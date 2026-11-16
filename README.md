@@ -1,8 +1,10 @@
 # BoneCollector
 
-A native **RuneScape 3 Lua plugin** that keeps a counter for your friends when
-you collect bones plausibly associated with their disappearance. It uses the
-official developer API, not Alt1, RuneLite, or VoragoSync.
+A native **RuneScape 3 Lua plugin** that automatically considers every nearby
+other player and counts bones you collect that can be conservatively matched
+to their disappearance. Click **BoneCollector** in game to open rows such as
+**"You have picked up 3 Alice bones"**. It uses the official developer API,
+not Alt1, RuneLite, or VoragoSync.
 
 **These are inferred bone collections, not confirmed deaths or bone ownership.**
 The API exposes neither a player's death state nor the deceased person's name
@@ -20,7 +22,7 @@ contracts; **it has not been verified in the RuneScape client**.
    `C:\ProgramData\Jagex\RuneScape-BETA`.
 2. Install **[PrettyUI](https://github.com/PrettyRS/prettyui), mod.io ID 6398181**
    through the native plugin system. Development commands do not automatically
-   download dependencies. BoneCollector uses its SimpleView and TextField APIs;
+   download dependencies. BoneCollector uses its SimpleView, Window and SimpleButton APIs;
    no PrettyUI code or resources are bundled.
 3. Create `dev_plugins\bonecollector` inside that cache. Copy **only** `main.lua`,
    `plugin.json`, and the `src` directory from this repository into it. The result
@@ -37,24 +39,37 @@ The client needs only the Lua files and PrettyUI; **Node.js is not a runtime
 requirement**.
 
 Alternatively, developers can run `npm ci` and `npm run build`, then extract
-`dist\BoneCollector-0.1.0.zip` into the same `dev_plugins\bonecollector` directory.
+`dist\BoneCollector-0.2.0.zip` into the same `dev_plugins\bonecollector` directory.
 The ZIP has the runtime files at its root. It is a development install, not
 evidence of moderation approval.
 
-## Configure and use
+## Open and use
 
-Open **Plugin Hub > Manage > BoneCollector > Settings**, or BoneCollector's
-ribbon icon in the native **Plugins** window.
+Monitoring starts automatically with **all nearby other players**, whether or
+not they are friends. There is no name input, allowlist, or 20-name tracking
+limit. The local player is excluded. Matching remains case-insensitive and
+treats underscores as spaces; counters use each collected player's display name.
+An unavailable or unresolvable name is skipped rather than assigned a fake identity.
 
-Enter your friends' current display names, separated by commas, and press
-**Save tracked names** (or Enter). No names are tracked by default; an empty list
-disables counting. The prototype supports up to 20 names. Matching is exact,
-case-insensitive, and treats underscores as spaces; no wildcards are accepted.
-The documented API currently has no friend-list accessor, so this is an
-**explicit allowlist**, not automatic synchronization with your in-game friends.
-Other nearby players are observed only to reject ambiguous attribution.
+Click the **BoneCollector** button near the upper-left of the in-game UI.
+It opens a scrollable counts window with one row per counted player:
 
-Wait at least three seconds with your friend visible. For a qualifying event,
+```text
+You have picked up 3 Alice bones
+You have picked up 1 Bob bones
+```
+
+Rows update after qualifying pickups and are sorted by name. Players with no
+collected bones do not get a row. There is no fixed row limit; scroll to see
+additional names. Close the window with its close button and reopen it with
+**BoneCollector**. Repeated clicks raise the same window rather than opening
+duplicates. Unlock RuneScape's interface to move or resize the window.
+
+The same counts and diagnostics remain available through **Plugin Hub > Manage >
+BoneCollector > Settings**, or the ribbon icon in the native **Plugins** window.
+The obsolete tracked-name settings have been removed.
+
+Wait at least three seconds with the other player visible. For a qualifying event,
 they must have been stationary on their last tile for at least 0.6 seconds.
 After they disappear and a single ordinary bone appears there, stand within
 one tile, choose its ground **Take** action, and collect it individually.
@@ -68,8 +83,7 @@ multiple bones on one tile, noted bones, auto-loot, or other bone types.
 Unsupported actions are skipped, not guessed. A full backpack or failed click
 does not count.
 
-Names and per-name counts are saved immediately with `PersistentDB`. Removing
-a tracked name does not erase its history; adding it again shows the old count.
+Names and per-name counts are saved after each collection with `PersistentDB`.
 Name changes are separate names, not automatically linked accounts. Storage
 is local to the installation and client type, shared across characters; beta
 and live data are separate. There is no service, upload, chat scraping, or
@@ -80,11 +94,27 @@ If saving fails, the panel says **NOT SAVED**. Changes remain in memory; use
 **Retry save** before unloading. Invalid saved data stops startup rather than
 silently overwriting history.
 
+### Upgrading from 0.1.0
+
+Disable the plugin with `poff bonecollector`, replace the six runtime files
+with the contents of the 0.2.0 ZIP, then run `pon bonecollector`. **Do not clear
+the plugin's persistent database.** Existing totals are automatically migrated,
+including totals for players no longer in the old allowlist. An old empty
+allowlist no longer disables tracking.
+
+The old list is used only to preserve existing display-name capitalization
+during migration, not as a filter. Where the old version retained a total but
+not the display name, its saved lowercase key is displayed until a new
+qualifying collection supplies the current display case. Zero totals are
+preserved but do not produce rows. If migration cannot be saved, old storage
+is left intact, totals remain available in memory, and **Retry save** persists
+the upgraded data.
+
 ## What qualifies, and what does not
 
 A match requires all of these observations:
 
-- One fresh, sufficiently observed **tracked player** disappears on the exact
+- One fresh, sufficiently observed **other player** disappears on the exact
   bone tile, including its level, within 1.2 seconds of the bone appearing.
   Both event orders are supported. Other recent occupants, additional candidate
   departures, reappearances, or multiple bone appearances reject the match.
@@ -130,9 +160,11 @@ menu action/verb/index, backpack totals/deltas, and decision reasons. Player
 display names and menu subjects are not deliberately logged. Review any trace
 before sharing it; do not export other players' information.
 
-1. In the developer beta, enable **Diagnostics (this session)**. With a
-   consenting friend in a noncompetitive test location that actually leaves
-   ordinary bones, save their name, remain nearby, and wait three seconds.
+1. In the developer beta, click **BoneCollector** and enable **Diagnostics
+   (this session)**. With a consenting player in a noncompetitive test location
+   that actually leaves ordinary bones, remain nearby and wait three seconds.
+   No name configuration is needed, including for someone the plugin has
+   never seen before.
 2. Have them test one death while you remain in the same scene. Confirm that
    `player_removed` and `ground_added` (or `ground_changed`) identify the same
    tile and that the object ID is the reported ordinary `BONES` config.
@@ -141,9 +173,11 @@ before sharing it; do not export other players' information.
    Look for `menu`, `intent`, the exact ground removal, and `inventory` delta
    `1` with `other_changed false`, followed by `server_boundary`.
    `collection_evidence` and, after settling, `count` should occur exactly once.
-   Reload the plugin and confirm the saved count remains.
-4. Repeat negative controls: an untracked player; a teleport without new bones;
-   an attempted Take with a full backpack; another player taking the bones;
+   Confirm a row reads **"You have picked up 1 \<name\> bones"** (or that an
+   existing count increased by one). Close and reopen the interface, then
+   reload the plugin and confirm the saved count remains.
+4. Repeat negative controls: a disappearance without a pickup; a teleport
+   without new bones; an attempted Take with a full backpack; another player taking the bones;
    two possible players on the same tile; dropped/re-dropped bones without a
    new disappearance; and a world hop during an attempted pickup. None should
    increment a counter.
@@ -170,13 +204,14 @@ npm run build
 Tests run the actual Lua modules under **Lua 5.4 via Wasmoon**. The native client
 uses Lua **5.4.8**; the test runtime is not the client. The suite covers matching,
 false-positive controls, both event orders, invalid proxies, native payload
-translation, persistence errors, UI teardown, and lifecycle resets. It also
+translation, all-player attribution, legacy-data migration, more than 20 rows,
+the counts-window opener, persistence errors, UI teardown, and lifecycle resets. It also
 builds the ZIP and reruns the same scenarios using its packaged Lua files.
 
 - `src\matcher.lua`: API-independent, bounded-time correlation state machine.
 - `src\app.lua`: guarded native event adapter, copied snapshots and diagnostics.
-- `src\store.lua`: validated tracked names and persistent counters.
-- `src\view.lua`: native PrettyUI settings/content panels.
+- `src\store.lua`: persistent counters, display names and legacy-data migration.
+- `src\view.lua`: in-game opener, counts window and native settings/content panels.
 
 Official references: [events](https://developer.runescape.com/rs/core/events.html),
 [MiniMenu](https://developer.runescape.com/rs/game/minimenu.html),

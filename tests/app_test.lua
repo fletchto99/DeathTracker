@@ -26,9 +26,13 @@ local function proxy(data)
 end
 local function fixture(options)
     options = options or {}
-    local f = { tick = 0, logs = {}, slots = {}, visibleStacks = {}, widgets = {}, components = {}, nextID = 0 }
+    local f = {
+        tick = 0, logs = {}, slots = {}, visibleStacks = {}, widgets = {}, launchers = {},
+        components = {}, nextID = 0, failSave = options.failSave,
+    }
     print = function(...) f.logs[#f.logs + 1] = table.concat({ ... }, " ") end
     config = { Obj = { BONES = { id = 526 }, LOGS = { id = 1511 } }, Inv = { INV = { id = 93 } } }
+    id = { Component = { TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP = 99 } }
     MiniMenuEntryType, MiniMenuActionType, GameState = { OBJ = 2, INTERFACE = 1 }, { OP_OBJ3 = 20 }, { GAME = 30 }
     Event = {}
     for _, name in ipairs({
@@ -64,7 +68,7 @@ local function fixture(options)
         return { isValid = true, GetSlots = function() if not f.badSlots then return f.slots end end }
     end }
     PersistentDB = {
-        data = { version = 1, names = options.names or { "Alice" }, counts = {} }, writes = 0,
+        data = options.data or { version = 2, displayNames = {}, counts = {} }, writes = 0,
         GetStructuredData = function(self, key) assert(key == "state"); return copy(self.data) end,
         CheckExists = function(self, key) assert(key == "state"); return self.data ~= nil end,
         SetStructuredData = function(self, key, value)
@@ -86,32 +90,32 @@ local function fixture(options)
         end, data
     end
     ui = { Interfaces = { GetComponent = function(_, interfaceID, staticID, categoryID, dynamicID)
+        if staticID == nil then
+            assert(interfaceID == id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
+            return f.gameLayer
+        end
         assert(interfaceID == 1 and categoryID == 0 and dynamicID == 0)
         return f.components[staticID]
     end } }
+    f.gameLayer = f.component(1000, 800)
     local SimpleView = {}
-    function SimpleView.new(parent, dimensions)
-        assert(parent.width == dimensions.width and parent.height == dimensions.height)
+    local function newWidget(dimensions)
         local root, invalidate = f.component(dimensions.width, dimensions.height)
-        local widget = setmetatable({ root = root, texts = {}, buttons = {}, invalidate = invalidate }, { __index = SimpleView })
+        local widget = setmetatable({
+            root = root, texts = {}, buttons = {}, invalidate = invalidate, options = dimensions,
+        }, { __index = SimpleView })
         f.widgets[#f.widgets + 1] = widget
         return widget
+    end
+    function SimpleView.new(parent, dimensions)
+        assert(parent.width == dimensions.width and parent.height == dimensions.height)
+        return newWidget(dimensions)
     end
     function SimpleView:AddTitle(text) return self:AddText(text) end
     function SimpleView:AddText(options)
         local text = { content = type(options) == "string" and options or options.text }
         self.texts[#self.texts + 1] = text
         return text
-    end
-    function SimpleView:AddTextField(options)
-        local widget = self
-        local field = {
-            text = options.text, submit = options.onSubmit,
-            GetText = function(self) assert(not widget.destroyed, "stale field access"); return self.text end,
-            SetText = function(self, text, notify) assert(not notify); self.text = text end,
-        }
-        self.field = field
-        return field
     end
     function SimpleView:AddSimpleButton(label, callback)
         local button = { click = callback, SetActive = function(self, active) self.active = active end }
@@ -120,7 +124,25 @@ local function fixture(options)
     end
     function SimpleView:SetSize(width, height) self.width, self.height = width, height end
     function SimpleView:Destroy() self.destroyed = true; self.invalidate() end
-    prettyui = { SimpleView = SimpleView }
+    function SimpleView:Show() self.hidden = false; self.shows = (self.shows or 0) + 1 end
+    function SimpleView:Close() self.hidden = true end
+    prettyui = {
+        SimpleView = SimpleView,
+        Window = { new = function(parent, dimensions)
+            assert(parent == f.gameLayer)
+            return newWidget(dimensions)
+        end },
+        SimpleButton = { new = function(parent, label, action, dimensions)
+            assert(parent == f.gameLayer)
+            local root, invalidate = f.component(dimensions.width, dimensions.height)
+            local button = {
+                root = root, label = label, click = action, invalidate = invalidate,
+                Destroy = function(self) self.destroyed = true; invalidate() end,
+            }
+            f.launchers[#f.launchers + 1] = button
+            return button
+        end },
+    }
     function f.go(target)
         for tick = f.tick + 1, target do
             f.tick = tick
@@ -345,25 +367,21 @@ test("missing inventory and API read errors stop counting rather than defaulting
         f.shutdown()
     end
 end)
-test("tracked-name editing validates before reset, synchronizes views and persists", function()
-    local f = fixture({ names = {} })
+test("a name never in the old allowlist counts automatically without editing settings", function()
+    local f = fixture({ data = { version = 1, names = { "Bob" }, counts = { bob = 3 } } })
     f.go(161)
     local settings = f.show()
     local content = f.show("ContentLayerReady")
-    settings.field.text = "Alice,*"
-    settings.buttons["Save tracked names"].click()
-    assert(#PersistentDB.data.names == 0)
-    settings.field.text = " ALIce "
-    settings.buttons["Save tracked names"].click()
-    assert(PersistentDB.data.names[1] == "ALIce")
-    assert(content.field.text == "ALIce")
-    f.go(400)
+    assert(settings.field == nil and settings.buttons["Save tracked names"] == nil)
+    assert(PersistentDB.data.names == nil and PersistentDB.data.counts.bob == 3)
     f.die()
     f.collect(f.ground({ f.bone() }, true))
-    f.go(540)
+    f.go(300)
     f.emit("Draw")
     assert(f.credit() == 1)
-    assert(content.texts[#content.texts].content == "ALIce: 1")
+    assert(content.texts[#content.texts - 1].content == "You have picked up 1 Alice bones")
+    assert(content.texts[#content.texts].content == "You have picked up 3 Bob bones")
+    assert(PersistentDB.data.displayNames.alice == "Alice")
     f.noFatal()
     f.shutdown()
 end)
@@ -378,7 +396,7 @@ test("write failure is shown and retry saves the inferred count", function()
     f.emit("Draw")
     assert(f.credit() == 0)
     assert(widget.texts[3].content:match("NOT SAVED"))
-    assert(widget.texts[#widget.texts].content == "Alice: 1")
+    assert(widget.texts[#widget.texts].content == "You have picked up 1 Alice bones")
     f.failSave = false
     widget.buttons["Retry save"].click()
     f.emit("Draw")
@@ -413,11 +431,125 @@ test("view resizing, invalid UI roots, stale callbacks and shutdown are safe", f
     widget.invalidate()
     f.emit("Draw")
     assert(widget.destroyed)
-    widget.buttons["Save tracked names"].click()
+    widget.buttons["Retry save"].click()
     f.show()
     f.shutdown()
     for _, event in pairs(Event) do assert(next(event.callbacks) == nil) end
     for _, panel in ipairs(f.widgets) do assert(panel.destroyed) end
+    for _, launcher in ipairs(f.launchers) do assert(launcher.destroyed) end
     f.noFatal()
+end)
+test("in-game button opens, raises and reopens the counts window without duplicating it", function()
+    local f = fixture({ data = { version = 1, names = { "Alice" }, counts = { alice = 3, zero = 0 } } })
+    f.go(161)
+    f.emit("Draw")
+    assert(#f.launchers == 1 and f.launchers[1].label == "BoneCollector" and #f.widgets == 0)
+    local opener = f.launchers[1]
+    opener.click()
+    local window = f.widgets[1]
+    assert(window.shows == 1 and window.options.scrollable == true)
+    assert(window.texts[#window.texts].content == "You have picked up 3 Alice bones")
+    opener.click()
+    assert(#f.widgets == 1 and window.shows == 2)
+    window:Close()
+    assert(window.hidden)
+    opener.click()
+    assert(#f.widgets == 1 and not window.hidden)
+    f.die()
+    assert(f.credit() == 3)
+    f.collect(f.ground({ f.bone() }, true))
+    f.go(300)
+    f.emit("Draw")
+    assert(f.credit() == 4 and window.texts[#window.texts].content == "You have picked up 4 Alice bones")
+    f.noFatal()
+    f.shutdown()
+end)
+test("the interface has a separate row for every collected player beyond the old 20-name limit", function()
+    local counts, displayNames = {}, {}
+    for i = 1, 25 do counts["player" .. i], displayNames["player" .. i] = i, "Player" .. i end
+    local f = fixture({ data = { version = 2, displayNames = displayNames, counts = counts } })
+    f.go(161)
+    f.emit("Draw")
+    f.launchers[1].click()
+    local window, found = f.widgets[1], {}
+    for _, text in ipairs(window.texts) do
+        local count, name = text.content:match("^You have picked up (%d+) (Player%d+) bones$")
+        if count then found[name] = tonumber(count) end
+    end
+    local rowCount = 0
+    for name, count in pairs(found) do assert(count == tonumber(name:match("%d+"))); rowCount = rowCount + 1 end
+    assert(rowCount == 25)
+    f.noFatal()
+    f.shutdown()
+end)
+test("observed players alone do not add rows and empty counts need no configuration", function()
+    local f = fixture()
+    f.go(161)
+    f.emit("Draw")
+    f.launchers[1].click()
+    local window = f.widgets[1]
+    assert(window.texts[#window.texts].content == "No bones collected yet.")
+    assert(not window.texts[3].content:match("disabled"))
+    f.die()
+    f.go(300)
+    f.emit("Draw")
+    assert(window.texts[#window.texts].content == "No bones collected yet." and f.credit() == 0)
+    f.noFatal()
+    f.shutdown()
+end)
+test("launcher waits for the UI, survives remounts, and cannot be activated after logout", function()
+    local f = fixture()
+    local gameLayer = f.gameLayer
+    f.gameLayer = nil
+    f.go(161)
+    f.emit("Draw")
+    assert(#f.launchers == 0)
+    f.gameLayer = gameLayer
+    f.emit("Draw")
+    local old = f.launchers[1]
+    old.click()
+    local window = f.widgets[1]
+    old.invalidate()
+    f.emit("Draw")
+    assert(old.destroyed and window.destroyed and #f.launchers == 2)
+    old.click()
+    assert(#f.widgets == 1)
+    f.launchers[2].click()
+    f.emit("GameStateChanged", { newState = 20 })
+    f.emit("Draw")
+    f.launchers[2].click()
+    assert(#f.widgets == 2 and f.widgets[2].destroyed and f.launchers[2].destroyed)
+    f.emit("GameStateChanged", { newState = GameState.GAME })
+    f.go(162)
+    f.emit("Draw")
+    assert(#f.launchers == 3)
+    f.noFatal()
+    f.shutdown()
+end)
+test("failed legacy migration exposes preserved totals and retries without resetting them", function()
+    local f = fixture({
+        data = { version = 1, names = {}, counts = { alice = 4, bob = 2 } }, failSave = true,
+    })
+    local widget = f.show()
+    assert(PersistentDB.data.version == 1 and PersistentDB.data.counts.alice == 4)
+    assert(widget.texts[3].content:match("NOT SAVED"))
+    assert(widget.texts[#widget.texts - 1].content == "You have picked up 4 alice bones")
+    assert(widget.texts[#widget.texts].content == "You have picked up 2 bob bones")
+    f.failSave = false
+    widget.buttons["Retry save"].click()
+    assert(PersistentDB.data.version == 2 and PersistentDB.data.counts.alice == 4 and PersistentDB.data.counts.bob == 2)
+    f.noFatal()
+    f.shutdown()
+end)
+test("an unresolvable display name is still skipped rather than stored as a fake identity", function()
+    local f = fixture()
+    f.friendData.displayName = "<col=bad>"
+    f.go(161)
+    f.die()
+    f.collect(f.ground({ f.bone() }, true))
+    f.go(300)
+    assert(next(PersistentDB.data.counts) == nil)
+    f.noFatal()
+    f.shutdown()
 end)
 return passed

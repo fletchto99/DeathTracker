@@ -34,8 +34,8 @@ function App.start()
             sequence, matcher and matcher.tick or 0, matcher and matcher.packet or 0, kind, table.concat(values, " ")))
     end
 
-    matcher = Matcher.new(store:tracked(), function(name)
-        if store:increment(name) then
+    matcher = Matcher.new(function(name, display)
+        if store:increment(name, display) then
             message = "Inferred collection recorded."
         else
             message = "Collection recorded in memory, but NOT saved. Use Retry save."
@@ -89,7 +89,7 @@ function App.start()
     end
 
     local function rememberPlayer(entity)
-        if not entity or not entity.isValid or entity == selfEntity then return end
+        if not entity or not entity.isValid or entity == selfEntity or entity.uid == selfEntity.uid then return end
         local record = find(players, entity)
         local uid = entity.uid
         if not record then
@@ -102,8 +102,8 @@ function App.start()
             players[#players + 1] = record
         end
         record.entity = entity
-        local name = Store.nameKey(entity.displayName) or ("untracked:" .. record.key)
-        matcher:observePlayer(record.key, name, tile(entity))
+        local name, display = Store.nameKey(entity.displayName)
+        matcher:observePlayer(record.key, name, tile(entity), display)
         return record
     end
 
@@ -215,15 +215,6 @@ function App.start()
     end
 
     view = View.new(store, {
-        names = function(text)
-            local names, err = Store.parseNames(text)
-            if not names then message = err; return end
-            local saved, saveError = store:setNames(text)
-            matcher.tracked = store:tracked()
-            restart("tracked names changed")
-            message = saved and "Tracked names saved. Warming up." or saveError
-            if not saved then print("[BoneCollector] " .. message) end
-        end,
         save = function()
             message = store:save() and "Saved." or "NOT saved. Check the client console and retry."
             if store.unsaved then print("[BoneCollector] " .. message) end
@@ -237,9 +228,8 @@ function App.start()
             local status
             if fatal then status = "Monitoring stopped; reload with prl bonecollector. " .. fatal
             elseif not ready then status = "Waiting for a game and backpack baseline."
-            elseif #store.data.names == 0 then status = "Tracking disabled: no names configured."
             elseif matcher.tick - matcher.started < Matcher.warmup then status = "Warming up (3 seconds)."
-            else status = "Monitoring ordinary bones; attribution is an inference." end
+            else status = "Monitoring all nearby players; attribution is an inference." end
             return status .. "\n" .. message, diagnostics
         end,
     })
@@ -341,15 +331,16 @@ function App.start()
         inGame = event.newState == GameState.GAME
         restart("game state " .. tostring(event.newState))
         if not inGame then view:destroyAll() end
-    end, true)
+    end)
     for _, name in ipairs({ "WorldCreated", "WorldUpdated", "RegionCreated", "RegionUpdated" }) do
         subscribe(name, function() restart(name) end, true)
     end
     subscribe("SettingsLayerReady", function(event) view:show("settings", event.component) end)
     subscribe("ContentLayerReady", function(event) view:show("content", event.component) end)
-    subscribe("Draw", function() view:refresh() end)
+    subscribe("Draw", function() view:refresh(inGame and Player.IsAvailable()) end)
 
-    print("[BoneCollector] Native prototype loaded. Configure tracked names in Plugin Hub settings.")
+    if store.unsaved then print("[BoneCollector] Saved totals loaded, but the data upgrade was NOT saved. Use Retry save.") end
+    print("[BoneCollector] Monitoring all nearby players. Click BoneCollector to open collected-bone counts.")
     return function()
         stopped = true
         for _, event in ipairs(subscriptions) do event.Unsubscribe("BoneCollector") end

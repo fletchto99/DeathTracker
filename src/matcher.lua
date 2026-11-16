@@ -20,8 +20,8 @@ local function nearby(a, b)
     return a and b and a.level == b.level and math.abs(a.x - b.x) <= 1 and math.abs(a.z - b.z) <= 1
 end
 
-function Matcher.new(tracked, onCount, trace)
-    local self = setmetatable({ tracked = tracked, onCount = onCount, trace = trace, tick = 0 }, Matcher)
+function Matcher.new(onCount, trace)
+    local self = setmetatable({ onCount = onCount, trace = trace, tick = 0 }, Matcher)
     self:reset("startup")
     return self
 end
@@ -50,16 +50,18 @@ function Matcher:localPosition(tile)
     if self.pending and not nearby(tile, self.pending.bone.tile) then self:cancel("left pickup tile") end
 end
 
-function Matcher:observePlayer(key, name, tile)
+function Matcher:observePlayer(key, name, tile, displayName)
     local player = self.players[key]
     if not player then
         player = { key = key, name = name, since = self.tick, tileSince = self.tick }
         self.players[key] = player
-        for _, departure in pairs(self.departures) do
-            if departure.name == name then departure.returned = true end
-        end
-        for _, bone in pairs(self.bones) do
-            if bone.name == name then self:block(bone, "player reappeared") end
+        if name ~= nil then
+            for _, departure in pairs(self.departures) do
+                if departure.name == name then departure.returned = true end
+            end
+            for _, bone in pairs(self.bones) do
+                if bone.name == name then self:block(bone, "player reappeared") end
+            end
         end
     elseif player.name ~= name then
         self:reset("player identity changed")
@@ -68,6 +70,7 @@ function Matcher:observePlayer(key, name, tile)
         player.tileSince = self.tick
     end
     player.tile, player.last = tile, self.tick
+    player.displayName = displayName or name
     local id = tileKey(tile)
     self.visits[id] = self.visits[id] or {}
     self.visits[id][key] = self.tick
@@ -84,8 +87,8 @@ function Matcher:removePlayer(key)
     if not player then return end
     self.players[key] = nil
     local departure = {
-        key = key, name = player.name, tile = player.tile, at = self.tick,
-        eligible = self.tracked[player.name] ~= nil
+        key = key, name = player.name, displayName = player.displayName, tile = player.tile, at = self.tick,
+        eligible = player.name ~= nil
             and self.tick - self.started >= Matcher.warmup
             and self.tick - player.since >= Matcher.warmup
             and self.tick - player.tileSince >= 30
@@ -212,7 +215,7 @@ function Matcher:evaluate()
                     end
                 end
                 if #matches ~= 1 or not matches[1].eligible or matches[1].used or matches[1].returned then
-                    self:block(bone, "no unique fresh tracked departure")
+                    self:block(bone, "no unique fresh named departure")
                 else
                     local departure = matches[1]
                     for key in pairs(bone.occupants) do
@@ -232,7 +235,7 @@ function Matcher:evaluate()
             end
             if not bone.blocked and bone.collected and bone.departure then
                 bone.counted = true
-                self.onCount(bone.name)
+                self.onCount(bone.name, bone.departure.displayName)
                 self.trace("count", bone.key)
             end
         end
