@@ -3,7 +3,7 @@
 Native **RuneScape 3 Lua** plugin in
 [fletchto99/DeathTracker](https://github.com/fletchto99/DeathTracker).
 The product goal is **Your Death Count** plus **friends-only group death counts**.
-Version **0.4.0 starts with a functional self-death counter** for the first
+Version **0.4.1 provides a functional self-death counter** for the first
 in-client test. Friends' deaths remain the next step, not a removed feature goal.
 
 The self counter automatically increments for the incoming general game message:
@@ -22,7 +22,7 @@ Friend counting is not active yet. This is native Lua, not Alt1 or RuneLite.
    On Windows the default cache is `C:\ProgramData\Jagex\RuneScape-BETA`.
 2. Install **PrettyUI (mod.io 6398181)** through the native plugin system.
    The plugin uses its Window, SimpleButton and SimpleView APIs.
-3. Extract all files from `dist\DeathTracker-0.4.0.zip` into
+3. Extract all files from `dist\DeathTracker-0.4.1.zip` into
    `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker`, or
    `dev_plugins\deathtracker` under your actual beta cache.
 4. Once copying finishes, open the beta console with **Alt + the key below Esc**,
@@ -62,6 +62,32 @@ or closing the client. A failed storage read or invalid saved format suspends
 counting rather than silently resetting the total; resolve the storage problem
 and reload. There is no reset, import, migration or database-purge operation.
 
+### Logged-in name resolution
+
+The reported 0.4.0 status was produced **after** `Player.IsAvailable()` and
+`PlayerList.Self().isValid` passed: the name normalizer rejected `displayName`.
+It was not evidence that the player needed to log in. `PlayerList.Self()` is
+the documented equivalent of `Player.GetEntity()` and remains the accessor.
+
+Version 0.4.1 normalizes native non-breaking-space forms seen in RuneScape
+plugin reference implementations: UTF-8 U+00A0, a single 0xA0 byte, and the
+double-encoded U+00C2/U+00A0 form. They resolve to the same existing space-separated
+character key; saved totals are not renamed or reset. Lua's ordinary `%s` did
+not recognize these bytes, so 0.4.0 rejected otherwise valid names.
+
+The screenshots did not expose the raw native name, so they cannot prove its
+exact offending bytes. If another format is rejected, the panel now shows
+**Identity** details: player availability, entity presence/validity, name type
+and byte length, and the specific normalization failure (empty name, unsupported
+byte/position, or excessive length). It no longer labels that case "waiting for
+login". Status, last-event and identity sections use native `<br>` line breaks
+instead of newlines that the client ran together.
+
+The previously missed death is **not backfilled**. First confirm that the panel
+shows the correct character and numeric total; the next real matching game
+notification should increment once. If identity remains unavailable, record
+the Identity section and rejection reason, not unrelated players' chat.
+
 ## Message and identity rules
 
 - Accept only `ChatType.GENERAL` (0), the general game-message channel, with
@@ -73,7 +99,8 @@ and reload. There is no reset, import, migration or database-purge operation.
   `<col=...>` / `</col>` colour tags are removed; extra words, whitespace,
   other markup and approximate text are rejected.
 - Use the current local display name, case-insensitively with underscores
-  normalized to spaces, to separate character totals. Once a valid local name
+  and supported non-breaking-space forms normalized to spaces, to separate
+  character totals. Once a valid local name
   is observed, keep it through loading, reconnecting and death/respawn entity
   gaps. Clear it on the login screen, lobby or account/startup states; replace
   it when a different local character is observed. A message received before
@@ -158,6 +185,11 @@ self-test build. The deferred group capture has a separate source-only suite.
   [entity validity](https://developer.runescape.com/rs/game/entity/playerentity.html),
   [game-state events](https://developer.runescape.com/rs/core/events.html#gamestatechanged),
   and [PersistentDB](https://developer.runescape.com/rs/core/persistentdb.html).
+- Native name normalization references:
+  [RuneUI's name keys](https://github.com/JeremyDwayne/RuneUI/blob/34e4914a52ea5b1cf6eef23961d48285c595a74f/src/party.lua)
+  and [Entity Hider's player-name cleanup](https://github.com/Rcm37/entity-hider/blob/d682b7a6737d92069bc67d31629ed5da70ee5831/names.lua).
+  [The official UI tutorial](https://developer.runescape.com/rs/tutorial/5database.html)
+  demonstrates `<br>` for native text line breaks.
 - [Native-plugin game/player chat classification reference](https://github.com/GrynjolfLabs/rs3-Watchdog/blob/811d75df5c4531507e2499c54430b6d358e002e1/src/chat_types.lua)
   identifies `GENERAL` as game messages, separate from player chat. This does
   not substitute for testing the actual self-death payload in the client.

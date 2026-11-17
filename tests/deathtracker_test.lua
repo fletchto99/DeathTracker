@@ -15,7 +15,7 @@ end
 local function fixture(options)
     options = options or {}
     local f = {
-        data = options.data, granted = options.granted ~= false, name = "Alice", messages = {},
+        data = options.data, granted = options.granted ~= false, name = options.name or "Alice", messages = {},
         widgets = {}, buttons = {}, components = {}, nextID = 0, writes = 0, tick = 0,
         failRead = options.failRead,
     }
@@ -149,6 +149,65 @@ test("exact general game notice increments automatically and persists across rel
     f.death({ timestamp = 1001 })
     assert(f.count() == 2 and f.writes == 2)
     f.noFatal()
+    f.shutdown()
+end)
+test("native nonbreaking-space name variants resolve to the existing character total", function()
+    for _, separator in ipairs({ "\194\160", "\160", "\195\130\194\160" }) do
+        local f = fixture({
+            name = "Alice" .. separator .. "Smith",
+            data = { version = 1, characters = { ["alice smith"] = { count = 4, recent = { 900 } } } },
+        })
+        assert(f.panel.texts[1].content == "Your Death Count: 4")
+        assert(f.panel.texts[2].content == "Character: Alice Smith")
+        assert(f.panel.texts[3].content:match("Normalization succeeded"))
+        assert(f.writes == 0, "resolving a name must not create or backfill a death")
+        f.death()
+        f.death()
+        assert(f.count("alice smith") == 5 and f.writes == 1)
+        f.reload()
+        assert(f.panel.texts[1].content == "Your Death Count: 5")
+        f.noFatal()
+        f.shutdown()
+    end
+end)
+test("logged-in name rejection shows exact identity diagnostics and readable boundaries without backfilling", function()
+    local f = fixture({ name = "<unknown>Alice</unknown>" })
+    local status = f.panel.texts[3].content
+    assert(status:match("Local player is loaded") and status:match("player available=true"))
+    assert(status:match("entity valid=true") and status:match("name type=string"))
+    assert(status:match("unsupported byte 0x3C at normalized position 1"))
+    assert(not f.panel.texts[2].content:match("waiting for login"))
+    assert(status:find("<br>", 1, true) and not status:find("\n", 1, true))
+    f.death()
+    status = f.panel.texts[3].content
+    assert(status:find("<br>Self-death notification skipped", 1, true) and f.writes == 0)
+    f.name = "Alice\194\160Smith"
+    f.step()
+    assert(f.panel.texts[1].content == "Your Death Count: 0" and f.writes == 0)
+    f.death({ timestamp = 1001 })
+    assert(f.count("alice smith") == 1 and f.writes == 1)
+    f.shutdown()
+end)
+test("diagnostics distinguish unavailable entities and unavailable or malformed names", function()
+    local f = fixture()
+    f.noEntity = true
+    f.step()
+    assert(f.panel.texts[3].content:match("entity=nil") and f.panel.texts[1].content == "Your Death Count: 0")
+    f.noEntity, f.invalidEntity = false, true
+    f.step()
+    assert(f.panel.texts[3].content:match("entity valid=false"))
+    f.invalidEntity, f.name = false, nil
+    f.step()
+    assert(f.panel.texts[3].content:match("name type=nil") and f.panel.texts[1].content == "Your Death Count: unavailable")
+    f.name = "   "
+    f.step()
+    assert(f.panel.texts[3].content:match("empty after whitespace normalization"))
+    f.name = "AverylongnameX"
+    f.step()
+    assert(f.panel.texts[3].content:match("normalized name is 14 bytes"))
+    f.name = "Alice"
+    f.step()
+    assert(f.panel.texts[1].content == "Your Death Count: 0" and f.writes == 0)
     f.shutdown()
 end)
 test("native colour tags normalize without accepting unrelated or loose text", function()

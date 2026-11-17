@@ -19,6 +19,7 @@ function Tracker.start()
     local panels, launcher, events = {}, nil, {}
     local sessionOpen, stopped, granted, failure = true, false, false, nil
     local characterKey, characterName, identityError, lastNotice, lastError
+    local identityDetail = "Identity: local player data has not been read yet."
     local lastPoll = -10
 
     local function report(message)
@@ -27,15 +28,30 @@ function Tracker.start()
     end
 
     local function refreshIdentity()
-        if not sessionOpen or not Player.IsAvailable() then return end
-        local entity = PlayerList.Self()
-        if not entity or not entity.isValid then return end
-        local key, display = Names.nameKey(entity.displayName)
-        if not key then
-            characterKey, characterName = nil, nil
-            identityError = "Cannot resolve the current character's display name; counting is suspended."
+        if not sessionOpen then identityDetail = "Identity: session ended."; return end
+        identityError = nil
+        local cached = characterKey and "Using the known session character." or "No session character has been resolved."
+        if not Player.IsAvailable() then
+            identityDetail = "Identity: player available=false. " .. cached
             return
         end
+        local entity = PlayerList.Self()
+        if not entity then identityDetail = "Identity: player available=true; entity=nil. " .. cached; return end
+        if not entity.isValid then
+            identityDetail = "Identity: player available=true; entity valid=false; name not read. " .. cached
+            return
+        end
+        local rawName = entity.displayName
+        local key, display, reason = Names.nameKey(rawName)
+        identityDetail = "Identity: player available=true; entity valid=true; name type=" .. type(rawName)
+            .. (type(rawName) == "string" and ("; bytes=" .. #rawName) or "") .. "."
+        if not key then
+            characterKey, characterName = nil, nil
+            identityError = "Local player is loaded, but its name could not be normalized. Counting is suspended."
+            identityDetail = identityDetail .. " Name rejected: " .. reason .. "."
+            return
+        end
+        identityDetail = identityDetail .. " Normalization succeeded."
         if key ~= characterKey then lastNotice = nil end
         characterKey, characterName, identityError = key, display, nil
     end
@@ -50,10 +66,11 @@ function Tracker.start()
         elseif deaths.loadError then current = deaths.loadError
         elseif not granted then current = "Disabled: chatAccess permission is denied or revoked."
         elseif identityError then current = identityError
-        elseif not characterKey then current = "Waiting to observe your logged-in character."
+        elseif not characterKey then current = "Waiting for usable local-player name data."
         else current = "Monitoring your exact self-death game notification." end
-        if deaths.saveError then current = deaths.saveError .. "\n" .. current end
-        if lastNotice then current = current .. "\n" .. lastNotice end
+        if deaths.saveError then current = deaths.saveError .. "<br>" .. current end
+        if lastNotice then current = current .. "<br>" .. lastNotice end
+        if identityDetail then current = current .. "<br>" .. identityDetail end
         return current
     end
 
@@ -85,8 +102,8 @@ function Tracker.start()
         widget:AddTitle("Death Tracker")
         owner.count = widget:AddText({ text = "", height = 40, maxLines = 1 })
         owner.character = widget:AddText({ text = "", height = 32, maxLines = 1 })
-        owner.status = widget:AddText({ text = status(), height = 160, maxLines = 7 })
-        widget:AddText({ text = "Self-death test: automatic, no arming or group required.\n"
+        owner.status = widget:AddText({ text = status(), height = 220, maxLines = 10 })
+        widget:AddText({ text = "Self-death test: automatic, no arming or group required.<br>"
             .. "Friends-only group tracking is planned next and is not active yet.", height = 64, maxLines = 3 })
         widget:AddSimpleButton("Retry save", guarded(function()
             if panels[kind] ~= owner or not live(owner) then return end
@@ -100,7 +117,7 @@ function Tracker.start()
         if panels.window and not live(panels.window) then destroy("window") end
         if not panels.window then
             populate("window", own(prettyui.Window.new(parent, {
-                title = "Death Tracker", x = 180, y = 90, width = 520, height = 420,
+                title = "Death Tracker", x = 180, y = 90, width = 520, height = 480,
                 minWidth = 440, minHeight = 300, resizable = true,
             })))
         end
@@ -143,6 +160,7 @@ function Tracker.start()
         if state == GameState.LOGINSCREEN or state == GameState.LOBBY or state == GameState.ACCOUNT_CREATE
             or state == GameState.BOOT or state == GameState.INIT then
             sessionOpen, characterKey, characterName, identityError, lastNotice = false, nil, nil, nil, nil
+            identityDetail = "Identity: session ended."
             destroyUI()
         elseif state == GameState.GAME then
             sessionOpen = true
@@ -186,7 +204,7 @@ function Tracker.start()
                 local current = status()
                 if panel.lastStatus ~= current then panel.status.content, panel.lastStatus = current, current end
                 if panel.lastCount ~= countText then panel.count.content, panel.lastCount = countText, countText end
-                local name = characterName and ("Character: " .. characterName) or "Character: waiting for login"
+                local name = characterName and ("Character: " .. characterName) or "Character: name unavailable (see status)"
                 if panel.lastCharacter ~= name then panel.character.content, panel.lastCharacter = name, name end
             end
         end
