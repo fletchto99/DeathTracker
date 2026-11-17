@@ -1,6 +1,6 @@
 {
   "name": "deathtracker",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Native RuneScape 3 self-death counter; friends-only group tracking planned next.",
   "repository": {

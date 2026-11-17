@@ -1,9 +1,15 @@
 # Death Tracker
 
+> **Deployment hold:** a death-time client exit was reported with installed
+> version 0.4.1. Its cause is not yet established. Keep Death Tracker disabled
+> while the native crash is investigated. Version 0.4.2 is a reviewable native-UI
+> lifetime mitigation, **not a verified crash fix**. Do not run another death
+> test or deploy this candidate until the investigation/review allows it.
+
 Native **RuneScape 3 Lua** plugin in
 [fletchto99/DeathTracker](https://github.com/fletchto99/DeathTracker).
 The product goal is **Your Death Count** plus **friends-only group death counts**.
-Version **0.4.1 provides a functional self-death counter** for the first
+Version **0.4.2 provides a functional self-death counter** for the first
 in-client test. Friends' deaths remain the next step, not a removed feature goal.
 
 The self counter automatically increments for the incoming general game message:
@@ -20,9 +26,11 @@ Friend counting is not active yet. This is native Lua, not Alt1 or RuneLite.
 
 1. Follow the [official developer-beta setup](https://developer.runescape.com/rs/tutorial/1helloworld.html).
    On Windows the default cache is `C:\ProgramData\Jagex\RuneScape-BETA`.
-2. Install **PrettyUI (mod.io 6398181)** through the native plugin system.
-   The plugin uses its Window, SimpleButton and SimpleView APIs.
-3. Extract all files from `dist\DeathTracker-0.4.1.zip` into
+2. No external UI dependency is required. The plugin uses documented native
+   `ui.Layer`, `ui.Text` and `ui.Button` components in its plugin-tab/settings
+   panels. Existing PrettyUI installations used by other plugins need not be
+   changed or removed.
+3. Extract all files from `dist\DeathTracker-0.4.2.zip` into
    `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker`, or
    `dev_plugins\deathtracker` under your actual beta cache.
 4. Once copying finishes, open the beta console with **Alt + the key below Esc**,
@@ -43,7 +51,7 @@ disabled and messages are ignored. Runtime checks use the native
 
 ## Use
 
-Click **Death Tracker** near the upper-left of the game UI. The interface shows:
+Open **Death Tracker** in the native **Plugins** tab/ribbon. The interface shows:
 
 ```text
 Your Death Count: 0
@@ -52,8 +60,41 @@ Character: Your name
 
 The count updates automatically and is saved immediately when an accepted
 self-death notification arrives. You can also view it through **Plugin Hub >
-Manage > Death Tracker > Settings** or the native Plugins ribbon panel.
+Manage > Death Tracker > Settings**. There is no separate floating launcher
+button or popup window. Counting continues while these panels are closed.
 No manual arm/start action is needed. The count survives plugin reloads.
+
+## Native crash investigation and UI mitigation
+
+A client exit was reported during death with version 0.4.1, after the character
+and a numeric count were visible. No native dump/stack was available from the
+targeted checks, so the exact failing call remains unknown. Entity reads and
+the first persistence write may have been reached; this is not evidence that
+either caused the crash.
+
+The source audit did identify a separate lifetime violation: the old UI path
+detected a missing native root and still called PrettyUI's destructor. The
+installed PrettyUI 1.2.2 cleanup checks whether the interface is loaded, but may
+then read, reposition or destroy cached dynamic components that are already
+gone. Simply skipping that dependency's destructor would leave its private
+registry/input cleanup unresolved.
+
+Version 0.4.2 removes both the floating UI and the dependency altogether.
+The small content/settings panel now owns one native layer containing labels
+and Retry save. Before updates or destruction, each relevant native component
+is re-acquired through `ui.Interfaces:GetComponent` and checked for the original
+object and type. A still-live root is destroyed once, recursively disposing its
+children; if the host already removed it, only local Lua bookkeeping is dropped.
+There is no dependency registry, popup, drag/resize overlay or cached-proxy
+destructor to call. Native parent-relative anchors handle panel resizing.
+
+Counter matching, identity caching, deduplication and persistence timing are
+unchanged. No statistics were purged, invented or backfilled. Strict lifecycle
+tests reject dead-proxy reads/writes/destruction and changed-component-type
+access, including host removal while the interface remains loaded, ID reuse,
+remounts and partial creation. These verify the Lua/API contract, **not native
+memory safety or the reported crash's cause**. A native trace or controlled
+client validation is still needed; `pcall` cannot catch a native memory fault.
 
 Status text shows whether monitoring is active, chat access is missing, the
 character has not yet been observed, or storage/monitoring failed. **NOT SAVED**
@@ -123,6 +164,9 @@ at a time: the native database is shared and does not expose an atomic increment
 
 ## First in-client test
 
+The deployment hold above takes precedence. These steps apply only after
+the crash investigation/review permits client testing to resume.
+
 The source and packaged Lua pass automated tests, **not an in-client test**.
 The exact sentence is user-observed. The initial supported path is the native
 general game-message category; real delivery metadata still needs confirmation
@@ -171,7 +215,7 @@ Tests execute actual Lua modules through Wasmoon's Lua 5.4. The client uses Lua
 5.4.8 and is not exercised by these checks. Self-counter scenarios run against
 both source and the actual ZIP: message filtering, persistence/reload, duplicate
 evidence, character separation, transient entity loss, logout, denied/revoked
-permissions, read/write failures and UI lifecycle. Permission mocks require
+permissions, read/write failures and strict native UI lifecycle behavior. Permission mocks require
 userdata, preserving the regression for the earlier native argument error.
 Package tests ensure no tracking-ID or group/friends prerequisites ship in this
 self-test build. The deferred group capture has a separate source-only suite.
@@ -185,6 +229,12 @@ self-test build. The deferred group capture has a separate source-only suite.
   [entity validity](https://developer.runescape.com/rs/game/entity/playerentity.html),
   [game-state events](https://developer.runescape.com/rs/core/events.html#gamestatechanged),
   and [PersistentDB](https://developer.runescape.com/rs/core/persistentdb.html).
+- [Native component lifetime/lookup contract](https://developer.runescape.com/rs/ui/interface.html),
+  [layer construction](https://developer.runescape.com/rs/ui/layout_components/layer.html),
+  [text components](https://developer.runescape.com/rs/ui/decorative_components/text.html),
+  [button hooks](https://developer.runescape.com/rs/ui/interactive_components/button.html),
+  and [the official UI tutorial](https://developer.runescape.com/rs/tutorial/2simpleui.html)
+  for the native font and button stylesheet used by the panel.
 - Native name normalization references:
   [RuneUI's name keys](https://github.com/JeremyDwayne/RuneUI/blob/34e4914a52ea5b1cf6eef23961d48285c595a74f/src/party.lua)
   and [Entity Hider's player-name cleanup](https://github.com/Rcm37/entity-hider/blob/d682b7a6737d92069bc67d31629ed5da70ee5831/names.lua).

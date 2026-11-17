@@ -2,21 +2,30 @@ local Deaths = require("src/deaths")
 local Names = require("src/names")
 local Tracker = {}
 
-local function own(widget)
-    local root = widget.root
-    return { widget = widget, root = root, ids = { root.interfaceID, root.staticID, root.categoryID, root.dynamicID } }
+local function own(component)
+    assert(component, "Death Tracker: native UI component creation failed.")
+    return {
+        reference = component, componentType = component.type,
+        ids = { component.interfaceID, component.staticID, component.categoryID, component.dynamicID },
+    }
 end
 
-local function live(owner)
-    return owner and ui.Interfaces:GetComponent(table.unpack(owner.ids)) == owner.root
+local function resolve(handle)
+    if not handle then return nil end
+    local component = ui.Interfaces:GetComponent(table.unpack(handle.ids))
+    if component == handle.reference and component.type == handle.componentType then return component end
+end
+
+local function setText(handle, value)
+    local component = resolve(handle)
+    if not component then return false end
+    component.content = value
+    return true
 end
 
 function Tracker.start()
-    assert(type(prettyui) == "table" and type(prettyui.Window) == "table"
-        and type(prettyui.SimpleButton) == "table" and type(prettyui.SimpleView) == "table",
-        "Death Tracker requires PrettyUI Window, SimpleButton and SimpleView.")
     local deaths = Deaths.new(PersistentDB)
-    local panels, launcher, events = {}, nil, {}
+    local panels, events = {}, {}
     local sessionOpen, stopped, granted, failure = true, false, false, nil
     local characterKey, characterName, identityError, lastNotice, lastError
     local identityDetail = "Identity: local player data has not been read yet."
@@ -88,40 +97,51 @@ function Tracker.start()
     local function destroy(kind)
         local owner = panels[kind]
         panels[kind] = nil
-        if owner then owner.widget:Destroy() end
+        if not owner then return end
+        -- Native parent removal already disposes its children. Never invoke
+        -- methods on cached proxies after GetComponent stops returning them.
+        local root = resolve(owner.root)
+        if root then
+            local retry = resolve(owner.retry)
+            if retry then retry:Unsubscribe(ui.Hook.ONBUTTONPRESSED, "deathtracker.retry") end
+            root = resolve(owner.root)
+            if root then root:Destroy() end
+        end
     end
 
     local function destroyUI()
         for kind in pairs(panels) do destroy(kind) end
-        if launcher then launcher.widget:Destroy(); launcher = nil end
     end
 
-    local function populate(kind, owner)
+    local function populate(kind, parent)
+        local root = assert(ui.Layer.new(parent, 0), "Death Tracker: native panel creation failed.")
+        local owner = { root = own(root) }
         panels[kind] = owner
-        local widget = owner.widget
-        widget:AddTitle("Death Tracker")
-        owner.count = widget:AddText({ text = "", height = 40, maxLines = 1 })
-        owner.character = widget:AddText({ text = "", height = 32, maxLines = 1 })
-        owner.status = widget:AddText({ text = status(), height = 220, maxLines = 10 })
-        widget:AddText({ text = "Self-death test: automatic, no arming or group required.<br>"
-            .. "Friends-only group tracking is planned next and is not active yet.", height = 64, maxLines = 3 })
-        widget:AddSimpleButton("Retry save", guarded(function()
-            if panels[kind] ~= owner or not live(owner) then return end
+        root:SetSize(0, 0, 1.0, 1.0)
+        root.clickthrough = false
+        local function text(y, height, maxLines, content, heightAnchor, yAnchor)
+            local label = assert(ui.Text.new(root), "Death Tracker: native text creation failed.")
+            label:SetPos(12, y, 0, yAnchor or 0)
+            label:SetSize(-24, height, 1.0, heightAnchor or 0)
+            label.font = id.Font.MUSEO_SANS_15PT_REGULAR
+            label.maxLines, label.content, label.clickthrough = maxLines, content, true
+            return own(label)
+        end
+        owner.count = text(12, 32, 1, "")
+        owner.character = text(48, 24, 1, "")
+        owner.status = text(80, -160, 0, status(), 1.0)
+        owner.note = text(-72, 24, 1, "Self-only test; friends-only group tracking is planned next.", 0, 1.0)
+        local retry = assert(ui.Button.new(root), "Death Tracker: native retry button creation failed.")
+        owner.retry = own(retry)
+        retry:SetPos(12, -40, 0, 1.0)
+        retry:SetSize(120, 28)
+        retry.stylesheetID, retry.label = id.StyleSheet.BUTTON_DEFAULT, "Retry save"
+        retry:Subscribe(ui.Hook.ONBUTTONPRESSED, "deathtracker.retry", guarded(function(button)
+            if panels[kind] ~= owner or not resolve(owner.root) or resolve(owner.retry) ~= button then return end
             local saved, err = deaths:save()
             lastNotice = saved and "Death counts saved." or err
             report(err)
         end))
-    end
-
-    local function showCounts(parent)
-        if panels.window and not live(panels.window) then destroy("window") end
-        if not panels.window then
-            populate("window", own(prettyui.Window.new(parent, {
-                title = "Death Tracker", x = 180, y = 90, width = 520, height = 480,
-                minWidth = 440, minHeight = 300, resizable = true,
-            })))
-        end
-        panels.window.widget:Show()
     end
 
     local function subscribe(name, callback)
@@ -172,40 +192,26 @@ function Tracker.start()
     for _, kind in ipairs({ "settings", "content" }) do
         subscribe(kind == "settings" and "SettingsLayerReady" or "ContentLayerReady", function(event)
             destroy(kind)
-            local owner = own(prettyui.SimpleView.new(event.component, { width = event.component.width, height = event.component.height }))
-            owner.parent = { event.component.interfaceID, event.component.staticID, event.component.categoryID, event.component.dynamicID }
-            owner.width, owner.height = event.component.width, event.component.height
-            populate(kind, owner)
+            populate(kind, event.component)
         end)
     end
     subscribe("Draw", function()
         if not sessionOpen then destroyUI(); return end
-        if launcher and not live(launcher) then destroyUI() end
-        if not launcher then
-            local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
-            if parent then
-                local owner
-                owner = own(prettyui.SimpleButton.new(parent, "Death Tracker", guarded(function()
-                    if launcher == owner and live(owner) then showCounts(parent) end
-                end), { x = 20, y = 90, width = 150, height = 30 }))
-                launcher = owner
-            end
-        end
         for kind, panel in pairs(panels) do
-            if not live(panel) then destroy(kind)
+            if not resolve(panel.root) or not resolve(panel.count) or not resolve(panel.character) or not resolve(panel.status) then
+                destroy(kind)
             else
-                local parent = panel.parent and ui.Interfaces:GetComponent(table.unpack(panel.parent))
-                if parent and (parent.width ~= panel.width or parent.height ~= panel.height) then
-                    panel.width, panel.height = parent.width, parent.height
-                    panel.widget:SetSize(parent.width, parent.height)
-                end
                 local count = deaths:count(characterKey)
                 local countText = "Your Death Count: " .. (count ~= nil and tostring(count) or "unavailable")
                 local current = status()
-                if panel.lastStatus ~= current then panel.status.content, panel.lastStatus = current, current end
-                if panel.lastCount ~= countText then panel.count.content, panel.lastCount = countText, countText end
                 local name = characterName and ("Character: " .. characterName) or "Character: name unavailable (see status)"
-                if panel.lastCharacter ~= name then panel.character.content, panel.lastCharacter = name, name end
+                if (panel.lastStatus == current or setText(panel.status, current))
+                    and (panel.lastCount == countText or setText(panel.count, countText))
+                    and (panel.lastCharacter == name or setText(panel.character, name)) then
+                    panel.lastStatus, panel.lastCount, panel.lastCharacter = current, countText, name
+                else
+                    destroy(kind)
+                end
             end
         end
     end)

@@ -44,13 +44,17 @@ test("packaged Death Tracker runs the entrypoint scenarios", async (t) => {
   assert.equal(metadata.homepage, "https://github.com/fletchto99/DeathTracker");
   const manifest = JSON.parse(Buffer.from(archive["plugin.json"]).toString("utf8"));
   assert.equal(manifest.name, "Death Tracker");
+  assert.equal(manifest.hasRibbonIcon, true);
+  assert.equal(manifest.hasSettingsIcon, true);
+  assert.deepEqual(manifest.requiredDependencies, {});
+  assert.deepEqual(manifest.optionalDependencies, {});
   assert.deepEqual(manifest.requiredPermissions, ["chatAccess"]);
   assert.deepEqual(manifest.optionalPermissions, []);
   assert.equal(manifest.version, metadata.version);
   assert.equal(lockfile.version, metadata.version);
   assert.equal(lockfile.packages[""].version, metadata.version);
   for (const contents of Object.values(archive)) {
-    assert.doesNotMatch(Buffer.from(contents).toString("utf8"), /GetTrackingID|trackingAccess|group_capture|FRIENDS2|GROUP_CHILD/);
+    assert.doesNotMatch(Buffer.from(contents).toString("utf8"), /prettyui|GetTrackingID|trackingAccess|group_capture|FRIENDS2|GROUP_CHILD/);
   }
   await runSuite(t, archive);
 });

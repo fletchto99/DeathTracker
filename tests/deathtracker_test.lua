@@ -16,7 +16,8 @@ local function fixture(options)
     options = options or {}
     local f = {
         data = options.data, granted = options.granted ~= false, name = options.name or "Alice", messages = {},
-        widgets = {}, buttons = {}, components = {}, nextID = 0, writes = 0, tick = 0,
+        widgets = {}, components = {}, states = {}, nextID = 0, nextStatic = 0, writes = 0, tick = 0,
+        invalidAccesses = 0, destroyCalls = 0,
         failRead = options.failRead,
     }
     print = function(message) f.messages[#f.messages + 1] = message end
@@ -38,7 +39,7 @@ local function fixture(options)
     ChatType = { GENERAL = 0 }
     GameState = { BOOT = 0, INIT = 1, LOGINSCREEN = 10, LOBBY = 20, ACCOUNT_CREATE = 23,
         GAME = 30, RECONNECTING = 35, RECONNECTING_FULL = 36, SWITCH_WORLD = 37, LOADING = 40 }
-    id = { Component = { TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP = 9999 } }
+    id = { Font = { MUSEO_SANS_15PT_REGULAR = 15 }, StyleSheet = { BUTTON_DEFAULT = 11 } }
     PersistentDB = {
         GetStructuredData = function(_, key)
             assert(key == Deaths.key)
@@ -55,18 +56,130 @@ local function fixture(options)
             return true
         end,
     }
+    local function address(interfaceID, staticID, categoryID, dynamicID)
+        return table.concat({ interfaceID, staticID, categoryID, dynamicID }, ":")
+    end
+    local function layout(node)
+        local state = f.states[node]
+        if not state.alive then return end
+        if state.parent then
+            local parent = f.states[state.parent]
+            state.width = math.max(0, state.widthOffset + parent.width * state.widthAnchor)
+            state.height = math.max(0, state.heightOffset + parent.height * state.heightAnchor)
+            state.x, state.y = state.xOffset + parent.width * state.xAnchor, state.yOffset + parent.height * state.yAnchor
+        end
+        for _, child in ipairs(state.children) do layout(child) end
+    end
+    local function check(state, field)
+        if not state.alive then
+            f.invalidAccesses = f.invalidAccesses + 1
+            error("native UI access after removal: " .. field)
+        end
+    end
+    function f.invalidate(node)
+        local state = f.states[node]
+        state.alive = false
+        if f.components[state.address] == node then f.components[state.address] = nil end
+        for _, child in ipairs(state.children) do f.invalidate(child) end
+        state.hooks = {}
+        if state.widget then state.widget.destroyed = true end
+    end
+    local function component(kind, parent, staticID, categoryID, dynamicID, width, height)
+        local state = {
+            alive = true, type = kind, interfaceID = 1, staticID = staticID, categoryID = categoryID,
+            dynamicID = dynamicID, parent = parent, children = {}, hooks = {},
+            width = width or 0, height = height or 0, x = 0, y = 0,
+            widthOffset = 0, heightOffset = 0, widthAnchor = 0, heightAnchor = 0,
+            xOffset = 0, yOffset = 0, xAnchor = 0, yAnchor = 0,
+        }
+        state.address = address(1, staticID, categoryID, dynamicID)
+        local methods = {}
+        local node = setmetatable({}, {
+            __index = function(_, field) check(state, field); return methods[field] or state[field] end,
+            __newindex = function(_, field, value)
+                check(state, field)
+                if field == "content" and state.type ~= "Text" then
+                    f.invalidAccesses = f.invalidAccesses + 1
+                    error("content write on the wrong native component type")
+                end
+                state[field] = value
+                if field == "content" and f.onContentWrite then f.onContentWrite(state.node) end
+            end,
+        })
+        state.node = node
+        f.states[node], f.components[state.address] = state, node
+        if parent then table.insert(f.states[parent].children, node) end
+        function methods:SetSize(w, h, wa, ha)
+            check(state, "SetSize")
+            state.widthOffset, state.heightOffset = w, h
+            state.widthAnchor, state.heightAnchor = wa or 0, ha or 0
+            layout(node)
+        end
+        function methods:SetPos(x, y, xa, ya)
+            check(state, "SetPos")
+            state.xOffset, state.yOffset, state.xAnchor, state.yAnchor = x, y, xa or 0, ya or 0
+            layout(node)
+        end
+        function methods:Destroy()
+            check(state, "Destroy")
+            f.destroyCalls = f.destroyCalls + 1
+            f.invalidate(node)
+        end
+        function methods:Subscribe(hook, ref, callback)
+            check(state, "Subscribe")
+            assert(hook == ui.Hook.ONBUTTONPRESSED and ref == "deathtracker.retry")
+            state.hooks[ref] = callback
+            local owner = f.states[parent].widget
+            owner.buttons[state.label] = function() callback(node, 1, 0) end
+        end
+        function methods:Unsubscribe(hook, ref)
+            check(state, "Unsubscribe")
+            assert(hook == ui.Hook.ONBUTTONPRESSED and ref == "deathtracker.retry")
+            state.hooks[ref] = nil
+        end
+        return node
+    end
     function f.component(width, height)
+        f.nextStatic = f.nextStatic + 1
+        return component("Layer", nil, f.nextStatic, -1, -1, width, height)
+    end
+    function f.resize(parent, width, height)
+        f.states[parent].width, f.states[parent].height = width, height
+        layout(parent)
+    end
+    function f.replace(node, kind)
+        local state = f.states[node]
+        f.invalidate(node)
+        return component(kind or state.type, state.parent, state.staticID, state.categoryID, state.dynamicID)
+    end
+    local function create(kind, parent, categoryID)
+        check(f.states[parent], "constructor parent")
+        if f.failCreate == kind then return nil end
         f.nextID = f.nextID + 1
-        local root = { interfaceID = 1, staticID = f.nextID, categoryID = 0, dynamicID = 0, width = width, height = height }
-        f.components[f.nextID] = root
-        return root
+        local node = component(kind, parent, parent.staticID, categoryID or parent.categoryID, f.nextID)
+        if kind == "Layer" then
+            local widget = { root = node, texts = {}, buttons = {} }
+            f.states[node].widget = widget
+            f.widgets[#f.widgets + 1] = widget
+        elseif kind == "Text" then
+            table.insert(f.states[parent].widget.texts, node)
+        end
+        return node
     end
     f.parent = f.component(1000, 800)
-    ui = { Interfaces = { GetComponent = function(_, interfaceID, staticID)
-        if staticID then return f.components[staticID] end
-        assert(interfaceID == id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP, "self counter must not inspect a roster")
-        return f.parent
-    end } }
+    ui = {
+        Hook = { ONBUTTONPRESSED = "button-pressed" },
+        Interfaces = {
+            GetComponent = function(_, interfaceID, staticID, categoryID, dynamicID)
+                assert(interfaceID == 1 and staticID ~= nil and categoryID ~= nil and dynamicID ~= nil)
+                return f.components[address(interfaceID, staticID, categoryID, dynamicID)]
+            end,
+            GetInterface = function() return { id = 1 } end,
+        },
+        Layer = { new = function(parent, categoryID) return create("Layer", parent, categoryID) end },
+        Text = { new = function(parent, categoryID) return create("Text", parent, categoryID) end },
+        Button = { new = function(parent, categoryID) return create("Button", parent, categoryID) end },
+    }
     Event = {}
     for _, name in ipairs({ "Logic", "ChatMessage", "OptionalPermissionChanged", "GameStateChanged",
         "SettingsLayerReady", "ContentLayerReady", "Draw" }) do
@@ -78,43 +191,28 @@ local function fixture(options)
     function f.emit(name, data)
         for _, callback in pairs(Event[name].callbacks) do callback(data) end
     end
-    local Widget = {}
-    function Widget:AddTitle(text) self.title = text end
-    function Widget:AddText(options)
-        local text = { content = options.text }
-        self.texts[#self.texts + 1] = text
-        return text
-    end
-    function Widget:AddSimpleButton(label, action) self.buttons[label] = action end
-    function Widget:Show() self.shown = true end
-    function Widget:SetSize(width, height) self.root.width, self.root.height = width, height end
-    function Widget:Destroy() f.components[self.root.staticID] = nil; self.destroyed = true end
-    local function newWidget(_, options)
-        local widget = setmetatable({ root = f.component(options.width, options.height), texts = {}, buttons = {} }, { __index = Widget })
-        f.widgets[#f.widgets + 1] = widget
-        return widget
-    end
-    prettyui = {
-        Window = { new = newWidget }, SimpleView = { new = newWidget },
-        SimpleButton = { new = function(parent, label, action, dimensions)
-            local button = newWidget(parent, dimensions)
-            button.label, button.click = label, action
-            f.buttons[#f.buttons + 1] = button
-            return button
-        end },
-    }
+    prettyui = nil
     function f.step()
         f.tick = f.tick + 5
         f.emit("Logic", { logicTick = f.tick })
         f.emit("Draw")
     end
     function f.start()
+        local before = #f.widgets
         dofile("main.lua")
-        f.shutdown = PluginShutdown
+        local shutdown = PluginShutdown
+        f.shutdown = function()
+            shutdown()
+            assert(f.invalidAccesses == 0, "native UI lifetime/type contract was violated")
+        end
         f.step()
-        f.buttons[#f.buttons].click()
-        f.step()
-        f.panel = f.widgets[#f.widgets]
+        assert(#f.widgets == before, "startup and Draw must not create floating UI")
+        f.panel = f.open()
+    end
+    function f.open(kind, parent)
+        f.emit(kind or "ContentLayerReady", { component = parent or f.parent })
+        f.emit("Draw")
+        return f.widgets[#f.widgets]
     end
     function f.reload() f.shutdown(); f.start() end
     function f.notice(overrides)
@@ -140,7 +238,7 @@ end
 
 test("exact general game notice increments automatically and persists across reload", function()
     local f = fixture()
-    assert(f.panel.texts[1].content == "Your Death Count: 0" and f.buttons[1].label == "Death Tracker")
+    assert(f.panel.texts[1].content == "Your Death Count: 0")
     assert(f.panel.buttons["Capture one group death notice"] == nil)
     f.death()
     assert(f.count() == 1 and f.panel.texts[1].content == "Your Death Count: 1")
@@ -301,9 +399,7 @@ test("actual logout clears cached identity and characters retain separate totals
     f.name = "Bob"
     f.emit("GameStateChanged", { newState = GameState.GAME })
     f.step()
-    f.buttons[#f.buttons].click()
-    f.step()
-    f.panel = f.widgets[#f.widgets]
+    f.panel = f.open()
     assert(f.panel.texts[1].content == "Your Death Count: 0")
     f.death()
     assert(f.count("bob") == 1 and f.count("alice") == 1)
@@ -381,23 +477,107 @@ test("invalid or unreadable storage visibly disables counting without overwritin
         f.shutdown()
     end
 end)
-test("opener, settings resizing, stale callbacks and shutdown preserve single-subscription behavior", function()
+test("native content and settings panels refresh, resize and tear down without creating floating UI", function()
     local f = fixture()
-    local window = f.panel
-    f.buttons[1].click()
-    assert(f.widgets[#f.widgets] == window)
+    local content = f.panel
+    f.step()
+    assert(#f.widgets == 1)
     local parent = f.component(450, 600)
-    f.emit("SettingsLayerReady", { component = parent })
-    local settings = f.widgets[#f.widgets]
-    parent.width = 480
+    local settings = f.open("SettingsLayerReady", parent)
+    f.resize(parent, 480, 600)
     f.step()
     assert(settings.root.width == 480)
     f.death()
     assert(settings.texts[1].content == "Your Death Count: 1")
+    assert(content.texts[1].content == "Your Death Count: 1")
+    local replacement = f.open()
+    assert(content.destroyed and not settings.destroyed)
+    assert(replacement.texts[1].content == "Your Death Count: 1")
+    f.invalidate(replacement.root)
+    f.step()
+    assert(replacement.destroyed and not settings.destroyed)
+    f.invalidate(settings.root)
+    f.step()
+    assert(settings.destroyed)
+    local before = #f.widgets
+    f.death({ timestamp = 1001 })
+    f.step()
+    assert(f.count() == 2 and #f.widgets == before, "counting must continue without any open panel")
     f.shutdown()
+    local writes = f.writes
     settings.buttons["Retry save"]()
-    f.buttons[1].click()
+    assert(f.writes == writes)
     for _, widget in ipairs(f.widgets) do assert(widget.destroyed) end
     for _, event in pairs(Event) do assert(next(event.callbacks) == nil) end
+end)
+test("native parent removal retires handles without calling methods on dead components", function()
+    local f = fixture()
+    local before = f.destroyCalls
+    f.invalidate(f.parent)
+    f.step()
+    assert(f.invalidAccesses == 0 and f.destroyCalls == before)
+    f.panel.buttons["Retry save"]()
+    assert(f.writes == 0)
+    f.emit("GameStateChanged", { newState = GameState.LOBBY })
+    f.shutdown()
+    assert(f.destroyCalls == before)
+end)
+test("component ID reuse never updates or destroys a different native component", function()
+    local f = fixture()
+    local replacement = f.replace(f.panel.root, "Layer")
+    local before = f.destroyCalls
+    f.step()
+    assert(f.destroyCalls == before and f.states[replacement].alive)
+    f.panel.buttons["Retry save"]()
+    assert(f.writes == 0 and f.invalidAccesses == 0)
+    f.shutdown()
+    assert(f.states[replacement].alive)
+end)
+test("missing child labels and partial native construction clean up only a still-live root", function()
+    local f = fixture()
+    f.invalidate(f.panel.texts[1])
+    local before = f.destroyCalls
+    f.step()
+    assert(f.panel.destroyed and f.destroyCalls == before + 1 and f.invalidAccesses == 0)
+    f.failCreate = "Text"
+    f.open()
+    assert(f.widgets[#f.widgets].destroyed)
+    assert(f.invalidAccesses == 0)
+    f.shutdown()
+end)
+test("changed native child type is never used as a text component", function()
+    local f = fixture()
+    f.states[f.panel.texts[1]].type = "Button"
+    local before = f.destroyCalls
+    f.death()
+    assert(f.count() == 1 and f.panel.destroyed)
+    assert(f.destroyCalls == before + 1 and f.invalidAccesses == 0)
+    f.shutdown()
+end)
+test("each native text write rechecks handles after a prior write triggers host removal", function()
+    local f = fixture()
+    f.onContentWrite = function(node)
+        if node == f.panel.texts[3] then
+            f.onContentWrite = nil
+            f.invalidate(f.panel.texts[1])
+        end
+    end
+    f.death()
+    assert(f.count() == 1 and f.panel.destroyed and f.invalidAccesses == 0)
+    f.shutdown()
+end)
+test("native anchors resize labels and keep Retry save inside the parent panel", function()
+    local f = fixture()
+    f.resize(f.parent, 500, 300)
+    f.step()
+    assert(f.panel.root.width == 500 and f.panel.root.height == 300)
+    assert(f.panel.texts[1].width == 476)
+    assert(f.panel.texts[3].height == 140)
+    local retry
+    for _, child in ipairs(f.states[f.panel.root].children) do
+        if child.type == "Button" then retry = child end
+    end
+    assert(retry and retry.y == 260 and retry.height == 28 and retry.stylesheetID == id.StyleSheet.BUTTON_DEFAULT)
+    f.shutdown()
 end)
 return passed
