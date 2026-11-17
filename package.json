@@ -1,6 +1,6 @@
 {
   "name": "deathtracker",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Native RuneScape 3 friends-only group Death Tracker contract validation.",
   "repository": {

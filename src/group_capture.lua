@@ -34,8 +34,8 @@ local function keys(values)
 end
 
 function Capture.context()
-    if not Plugin.HasPermission("chatAccess") then return nil, "Disabled: chatAccess permission is denied or revoked." end
-    if not Plugin.HasPermission("trackingAccess") then return nil, "Disabled: grant trackingAccess to bind the local character." end
+    if not Plugin.HasPermission(PluginPermissions.chatAccess) then return nil, "Disabled: chatAccess permission is denied or revoked." end
+    if not Plugin.HasPermission(PluginPermissions.trackingAccess) then return nil, "Disabled: grant trackingAccess to bind the local character." end
     if not Player.IsAvailable() then return nil, "Waiting for the local character." end
     local self = PlayerList.Self()
     if not self or not self.isValid then return nil, "Waiting for a valid local player." end
@@ -147,7 +147,7 @@ function Capture:message(event, context, problem, identity, tick)
     local isSelf = key == context.self
     if not isSelf and not context.friends[key] then return false end
     self.result = string.format(
-        "Death Tracker 0.3.1 validation capture - NOT a counted death\nchatType=%d; timestamp=%d; logicTick=%d\n"
+        "Death Tracker 0.3.2 validation capture - NOT a counted death\nchatType=%d; timestamp=%d; logicTick=%d\n"
         .. "All three sender fields were empty.\nsubject=%s; groupRowObserved=true; friendRowObserved=%s\n"
         .. "visibleGroupNames=%d; visibleFriendNames=%d\nredactedRaw=%s\n"
         .. "Template/category, roster freshness, and exactly-once behavior still require verification.",

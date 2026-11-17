@@ -5,11 +5,14 @@ Native **RuneScape 3 Lua** plugin development in
 The intended tracker counts deaths of **friends in your group**,
 with a separate **Your Death Count**. It does not use Alt1 or RuneLite.
 
-## Current status: 0.3.1 validation build
+## Current status: 0.3.2 validation build
 
 The display name is **Death Tracker**, the development/plugin identifier is
 **`deathtracker`**, and release archives use **`DeathTracker`**. Version 0.3.1
 standardizes naming only; it does not enable new detection or counting.
+Version 0.3.2 fixes the reported native permission argument error: runtime
+checks use `PluginPermissions.chatAccess` / `PluginPermissions.trackingAccess`
+objects, not the strings used in the JSON manifest. It does not enable counting.
 
 **Automatic death counting is NOT enabled.** The user reports a game message
 like `"Player xyz has died"`, but its exact native `ChatType`, formatting,
@@ -36,7 +39,7 @@ imports old totals as deaths, and never writes new counters.
 3. If Death Tracker is already enabled, run `poff deathtracker` in the beta
    console (**Alt + the key below Esc**). For a clean dev-plugins directory,
    simply create the destination in the next step.
-4. Extract `dist\DeathTracker-0.3.1.zip` into
+4. Extract `dist\DeathTracker-0.3.2.zip` into
    `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker` (or
    `dev_plugins\deathtracker` under your actual beta cache). Its five runtime
    files are `main.lua`, `plugin.json`, `src\deathtracker.lua`,
@@ -190,6 +193,10 @@ run again against the built ZIP without legacy pickup modules, and fail if the
 validation build accesses PersistentDB. They cover candidate filtering,
 spoofed ordinary chat, friend/group/self exclusions, duplicate capture,
 permissions, identity and lifecycle failures, UI opening and storage isolation.
+Permission mocks require opaque userdata and reject strings, covering the
+reported startup error as well as revocation, regrant and explicit rearming.
+Manifest permission names and `OptionalPermissionChanged.permissionName`
+remain strings, as required by those separate contracts.
 Legacy bone modules/tests remain in source history and development checks but
 are excluded from the new runtime package and never started by `main.lua`.
 

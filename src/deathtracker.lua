@@ -131,7 +131,8 @@ function Tracker.start()
         lastPoll = tick
         local context, problem, identity = readContext()
         capture:observe(context, problem, identity)
-        if not Plugin.HasPermission("chatAccess") or not Plugin.HasPermission("trackingAccess") or not Player.IsAvailable() then
+        if not Plugin.HasPermission(PluginPermissions.chatAccess) or not Plugin.HasPermission(PluginPermissions.trackingAccess)
+            or not Player.IsAvailable() then
             capture.result = nil
             if snapshot and live(snapshot) then snapshot.field:SetText(snapshotText(), false) end
         end

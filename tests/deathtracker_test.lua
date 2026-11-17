@@ -13,7 +13,14 @@ local function fixture()
         friendVisible = true, groupVisible = true, messages = {}, widgets = {}, buttons = {}, components = {}, nextID = 0,
     }
     print = function(message) f.messages[#f.messages + 1] = message end
-    Plugin = { HasPermission = function(permission) return f.permissions[permission] == true end }
+    -- Opaque userdata stand in for native PluginPermission objects; no stream IO.
+    PluginPermissions = { chatAccess = io.stdout, trackingAccess = io.stderr }
+    Plugin = { HasPermission = function(permission)
+        assert(type(permission) == "userdata", "Plugin.HasPermission expected PluginPermission userdata, received " .. type(permission))
+        if permission == PluginPermissions.chatAccess then return f.permissions.chatAccess == true end
+        if permission == PluginPermissions.trackingAccess then return f.permissions.trackingAccess == true end
+        error("unexpected native permission object")
+    end }
     Player = {
         IsAvailable = function() return not f.unavailable end,
         GetTrackingID = function() return f.character end,
@@ -199,8 +206,9 @@ test("capture expires and no fabricated roster rows grant membership", function(
     assert(capture.status:match("timed out"))
 end)
 
-local function appFixture()
+local function appFixture(deniedPermission)
     local f = fixture()
+    if deniedPermission then f.permissions[deniedPermission] = false end
     f.database = { state = { version = 2, counts = { alice = 99 }, displayNames = { alice = "Alice" } } }
     PersistentDB = setmetatable({}, { __index = function() error("validation build must not read or write saved counters") end })
     Event = {}
@@ -291,6 +299,47 @@ test("permission revocation and character changes clear displayed captures", fun
         assert(snapshot.field.text:match("No eligible candidate"))
         f.emit("ChatMessage", f.notice())
         assert(snapshot.field.text:match("No eligible candidate") and f.database.state.counts.alice == 99)
+        f.shutdown()
+    end
+end)
+test("native permission objects work at startup, revocation, regrant and rearming", function()
+    for _, permissionName in ipairs({ "chatAccess", "trackingAccess" }) do
+        local f = appFixture(permissionName)
+        assert(not f.panel.texts[2].content:match("Monitoring error"))
+        assert(f.panel.texts[2].content:match("Disabled:"))
+        f.permissions[permissionName] = true
+        f.emit("OptionalPermissionChanged", { permissionName = permissionName, enabled = true })
+        f.emit("Logic", { logicTick = 110 })
+        f.emit("Draw")
+        f.panel.buttons["Capture one group death notice"]()
+        f.emit("ChatMessage", f.notice())
+        f.panel.buttons["Show captured notice"]()
+        local snapshot = f.widgets[#f.widgets]
+        assert(snapshot.field.text:match("NOT a counted death"))
+
+        f.permissions[permissionName] = false
+        f.emit("OptionalPermissionChanged", { permissionName = permissionName, enabled = false })
+        f.emit("Logic", { logicTick = 120 })
+        f.emit("Draw")
+        assert(f.panel.texts[2].content:match("Disabled:") and not f.panel.texts[2].content:match("Monitoring error"))
+        assert(snapshot.field.text:match("No eligible candidate"))
+        f.panel.buttons["Capture one group death notice"]()
+        f.emit("ChatMessage", f.notice())
+        f.emit("Draw")
+        assert(snapshot.field.text:match("No eligible candidate"))
+
+        f.permissions[permissionName] = true
+        f.emit("OptionalPermissionChanged", { permissionName = permissionName, enabled = true })
+        f.emit("Logic", { logicTick = 140 })
+        f.emit("ChatMessage", f.notice())
+        f.emit("Draw")
+        assert(snapshot.field.text:match("No eligible candidate"), "regrant must not rearm automatically")
+        f.panel.buttons["Capture one group death notice"]()
+        f.emit("ChatMessage", f.notice())
+        f.emit("Draw")
+        assert(snapshot.field.text:match("NOT a counted death"))
+        assert(f.database.state.counts.alice == 99)
+        for _, line in ipairs(f.messages) do assert(not line:match("expected PluginPermission"), line) end
         f.shutdown()
     end
 end)
