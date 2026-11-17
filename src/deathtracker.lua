@@ -120,7 +120,7 @@ function Tracker.start()
 
     local function subscribe(name, callback)
         local event = assert(Event[name], "Death Tracker: missing native event " .. name)
-        event.Subscribe("DeathTracker", guarded(callback))
+        event.Subscribe("deathtracker", guarded(callback))
         events[#events + 1] = event
     end
 
@@ -199,7 +199,7 @@ function Tracker.start()
     print("[Death Tracker] Validation build: counting disabled; stored bone totals are untouched.")
     return function()
         stopped = true
-        for _, event in ipairs(events) do event.Unsubscribe("DeathTracker") end
+        for _, event in ipairs(events) do event.Unsubscribe("deathtracker") end
         capture:reset("Shutdown")
         destroyUI()
     end

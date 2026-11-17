@@ -147,7 +147,7 @@ function Capture:message(event, context, problem, identity, tick)
     local isSelf = key == context.self
     if not isSelf and not context.friends[key] then return false end
     self.result = string.format(
-        "Death Tracker 0.3.0 validation capture - NOT a counted death\nchatType=%d; timestamp=%d; logicTick=%d\n"
+        "Death Tracker 0.3.1 validation capture - NOT a counted death\nchatType=%d; timestamp=%d; logicTick=%d\n"
         .. "All three sender fields were empty.\nsubject=%s; groupRowObserved=true; friendRowObserved=%s\n"
         .. "visibleGroupNames=%d; visibleFriendNames=%d\nredactedRaw=%s\n"
         .. "Template/category, roster freshness, and exactly-once behavior still require verification.",

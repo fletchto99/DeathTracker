@@ -1,6 +1,6 @@
 {
   "name": "Death Tracker",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "hasSettingsIcon": true,
   "hasRibbonIcon": true,
   "requiredDependencies": {

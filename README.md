@@ -1,10 +1,15 @@
 # Death Tracker
 
-Native **RuneScape 3 Lua** plugin development in the existing BoneCollector
-repository. The intended tracker counts deaths of **friends in your group**,
+Native **RuneScape 3 Lua** plugin development in
+[fletchto99/DeathTracker](https://github.com/fletchto99/DeathTracker).
+The intended tracker counts deaths of **friends in your group**,
 with a separate **Your Death Count**. It does not use Alt1 or RuneLite.
 
-## Current status: 0.3.0 validation build
+## Current status: 0.3.1 validation build
+
+The display name is **Death Tracker**, the development/plugin identifier is
+**`deathtracker`**, and release archives use **`DeathTracker`**. Version 0.3.1
+standardizes naming only; it does not enable new detection or counting.
 
 **Automatic death counting is NOT enabled.** The user reports a game message
 like `"Player xyz has died"`, but its exact native `ChatType`, formatting,
@@ -28,26 +33,40 @@ imports old totals as deaths, and never writes new counters.
    On Windows the default cache is `C:\ProgramData\Jagex\RuneScape-BETA`.
 2. Install **PrettyUI (mod.io 6398181)** through the native plugin system.
    Window/TextField, SimpleButton and SimpleView support is required.
-3. If an earlier version is enabled, run `poff bonecollector` in the beta
-   console (**Alt + the key below Esc**).
-4. Extract `dist\DeathTracker-0.3.0.zip` into the existing
-   `dev_plugins\bonecollector` directory. Its five runtime files are:
-   `main.lua`, `plugin.json`, `src\death_tracker.lua`, `src\group_capture.lua`,
-   and `src\names.lua`. Do not clear the plugin database.
-5. Run `prf`, then `pon bonecollector`. The user-visible name is **Death Tracker**;
-   the repository and development folder have **not** been renamed.
+3. If Death Tracker is already enabled, run `poff deathtracker` in the beta
+   console (**Alt + the key below Esc**). For a clean dev-plugins directory,
+   simply create the destination in the next step.
+4. Extract `dist\DeathTracker-0.3.1.zip` into
+   `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker` (or
+   `dev_plugins\deathtracker` under your actual beta cache). Its five runtime
+   files are `main.lua`, `plugin.json`, `src\deathtracker.lua`,
+   `src\group_capture.lua`, and `src\names.lua`. Do not clear the plugin database.
+5. Run `prf`, then `pon deathtracker`. The UI shows **Death Tracker**.
 
 `chatAccess` is a **required** native permission. `trackingAccess` is declared
 optional so the UI can explain its absence, but is required to arm this
 character-bound validation capture. Review/grant these in the native plugin
-permission UI; the beta also provides `ppr bonecollector` to request declared
+permission UI; the beta also provides `ppr deathtracker` to request declared
 permissions. If denied chat access prevents the client from enabling the plugin,
 resolve the native permission prompt first. A running plugin checks permissions
 again before capture and shows a disabled status if they are missing/revoked.
 No HTTP permission, service, or external upload is used.
 
 Only the Lua files and PrettyUI are needed in game. **Node.js is development
-tooling only.** Reload updates with `prl bonecollector`.
+tooling only.** Reload updates with `prl deathtracker`; disable with
+`poff deathtracker`.
+
+### Historical data and names
+
+The predecessor was named BoneCollector and used the `bonecollector` development
+folder. Historical source modules and regression tests deliberately retain that
+name and their original bone-collection semantics. They are **not included in
+the current ZIP or executed by its entrypoint**.
+
+The new development folder may have a separate native storage namespace.
+This validation build neither reads nor writes either namespace, migrates old
+records, or claims old bone totals are deaths. Clearing plugin files does not
+authorize deleting or overwriting saved data; keep any existing records intact.
 
 ## Capture one real group death notification
 

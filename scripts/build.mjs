@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { zipSync } from "fflate";
 
 export async function runtimeFiles() {
-  return ["main.lua", "plugin.json", "src/death_tracker.lua", "src/group_capture.lua", "src/names.lua"];
+  return ["main.lua", "plugin.json", "src/deathtracker.lua", "src/group_capture.lua", "src/names.lua"];
 }
 
 export async function build() {

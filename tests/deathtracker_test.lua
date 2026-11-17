@@ -243,6 +243,7 @@ local function appFixture()
     }
     -- Execute the real entrypoint: the legacy bone app must not subscribe.
     dofile("main.lua")
+    assert(Event.ChatMessage.callbacks.deathtracker, "entrypoint must use the deathtracker identifier")
     f.shutdown = PluginShutdown
     f.emit("Logic", { logicTick = 100 })
     f.emit("Draw")

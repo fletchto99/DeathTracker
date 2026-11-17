@@ -1,8 +1,13 @@
 {
-  "name": "bonecollector",
-  "version": "0.3.0",
+  "name": "deathtracker",
+  "version": "0.3.1",
   "private": true,
   "description": "Native RuneScape 3 friends-only group Death Tracker contract validation.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fletchto99/DeathTracker.git"
+  },
+  "homepage": "https://github.com/fletchto99/DeathTracker",
   "type": "module",
   "engines": {
     "node": ">=22"
