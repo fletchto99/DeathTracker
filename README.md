@@ -5,12 +5,11 @@ Native **RuneScape 3 Lua** plugin development in
 The intended tracker counts deaths of **friends in your group**,
 with a separate **Your Death Count**. It does not use Alt1 or RuneLite.
 
-## Current status: 0.3.2 validation build
+## Current status: 0.3.3 validation build
 
 The display name is **Death Tracker**, the development/plugin identifier is
-**`deathtracker`**, and release archives use **`DeathTracker`**. Version 0.3.1
-standardizes naming only; it does not enable new detection or counting.
-Version 0.3.2 fixes the reported native permission argument error: runtime
+**`deathtracker`**, and release archives use **`DeathTracker`**. This build
+includes the fix for the reported native permission argument error: runtime
 checks use `PluginPermissions.chatAccess` / `PluginPermissions.trackingAccess`
 objects, not the strings used in the JSON manifest. It does not enable counting.
 
@@ -22,13 +21,12 @@ It must not be presented as a working death counter.
 
 The interface says **Your Death Count: unavailable (validation mode)** and
 **Friend death counts: unavailable (validation mode)**, rather than inventing
-zeroes or relabelling historical data. Self capture is limited to the same
+zeroes. Self capture is limited to the same
 group-message example; **solo deaths are not implemented**.
 
-The old bone-pickup detector is no longer started or packaged. No pickup,
-disappearance, zero-health, or area-loot fallback is used. **Existing bone
-totals are untouched:** the active build never accesses `PersistentDB`, never
-imports old totals as deaths, and never writes new counters.
+Detection research uses only group notifications, not a disappearance or
+zero-health fallback. The build never accesses `PersistentDB`, imports prior
+statistics, or writes new counters. There is no migration or database-purge code.
 
 ## Install for beta validation
 
@@ -36,15 +34,16 @@ imports old totals as deaths, and never writes new counters.
    On Windows the default cache is `C:\ProgramData\Jagex\RuneScape-BETA`.
 2. Install **PrettyUI (mod.io 6398181)** through the native plugin system.
    Window/TextField, SimpleButton and SimpleView support is required.
-3. If Death Tracker is already enabled, run `poff deathtracker` in the beta
-   console (**Alt + the key below Esc**). For a clean dev-plugins directory,
-   simply create the destination in the next step.
-4. Extract `dist\DeathTracker-0.3.2.zip` into
+3. Open the beta console with **Alt + the key below Esc**. For a clean
+   dev-plugins directory, create the destination in the next step.
+4. Extract all files from `dist\DeathTracker-0.3.3.zip` into
    `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker` (or
    `dev_plugins\deathtracker` under your actual beta cache). Its five runtime
    files are `main.lua`, `plugin.json`, `src\deathtracker.lua`,
-   `src\group_capture.lua`, and `src\names.lua`. Do not clear the plugin database.
-5. Run `prf`, then `pon deathtracker`. The UI shows **Death Tracker**.
+   `src\group_capture.lua`, and `src\names.lua`.
+5. After copying finishes, run `prf`, then `pon deathtracker` for a new
+   installation or `prl deathtracker` if it is already enabled.
+   The UI shows **Death Tracker**.
 
 `chatAccess` is a **required** native permission. `trackingAccess` is declared
 optional so the UI can explain its absence, but is required to arm this
@@ -58,18 +57,6 @@ No HTTP permission, service, or external upload is used.
 Only the Lua files and PrettyUI are needed in game. **Node.js is development
 tooling only.** Reload updates with `prl deathtracker`; disable with
 `poff deathtracker`.
-
-### Historical data and names
-
-The predecessor was named BoneCollector and used the `bonecollector` development
-folder. Historical source modules and regression tests deliberately retain that
-name and their original bone-collection semantics. They are **not included in
-the current ZIP or executed by its entrypoint**.
-
-The new development folder may have a separate native storage namespace.
-This validation build neither reads nor writes either namespace, migrates old
-records, or claims old bone totals are deaths. Clearing plugin files does not
-authorize deleting or overwriting saved data; keep any existing records intact.
 
 ## Capture one real group death notification
 
@@ -85,7 +72,7 @@ Typing the same sentence in public/private/friends/group chat is not accepted.
    and its native Plugins ribbon panel.
 3. Click **Capture one group death notice**. It arms for 60 seconds. Have the
    consenting friend perform one beta test death that produces the real game
-   notification. No bones need to be collected.
+   notification. No other game action is required.
 4. Open **Show captured notice**. If captured, click the field, **Ctrl+A**,
    **Ctrl+C**, then paste locally. The player name and character tracking ID
    are not included. Native text-field copying is still unverified in client;
@@ -153,8 +140,8 @@ Capture tests use synthetic examples and do not establish native provenance.
 
 **Observation is limited.** No off-screen, other-world or non-group friend deaths
 are promised. The API does not expose a generic friend's HP/death field.
-Future verified counters must remain separate from old bone data and be
-persisted per character. This validation build implements neither persistent
+Future verified counters must be persisted per character. This validation
+build implements neither persistent
 death totals nor a manual increment workaround.
 
 ## Sources
@@ -189,7 +176,7 @@ npm run build
 
 Tests execute actual Lua modules through Wasmoon's Lua 5.4. The client uses
 Lua 5.4.8 and is not exercised by these checks. The current entrypoint tests
-run again against the built ZIP without legacy pickup modules, and fail if the
+run again against the built ZIP, and fail if the
 validation build accesses PersistentDB. They cover candidate filtering,
 spoofed ordinary chat, friend/group/self exclusions, duplicate capture,
 permissions, identity and lifecycle failures, UI opening and storage isolation.
@@ -197,8 +184,6 @@ Permission mocks require opaque userdata and reject strings, covering the
 reported startup error as well as revocation, regrant and explicit rearming.
 Manifest permission names and `OptionalPermissionChanged.permissionName`
 remain strings, as required by those separate contracts.
-Legacy bone modules/tests remain in source history and development checks but
-are excluded from the new runtime package and never started by `main.lua`.
 
 The public repository is not Jagex approval. Before live distribution, follow
 the [plugin guidelines and moderation process](https://developer.runescape.com/rs/submission/guidelines.html).

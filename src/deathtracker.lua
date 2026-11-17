@@ -197,7 +197,7 @@ function Tracker.start()
         end
     end)
 
-    print("[Death Tracker] Validation build: counting disabled; stored bone totals are untouched.")
+    print("[Death Tracker] Validation build: counting disabled; group-death notification verification required.")
     return function()
         stopped = true
         for _, event in ipairs(events) do event.Unsubscribe("deathtracker") end

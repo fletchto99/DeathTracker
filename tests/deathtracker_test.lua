@@ -209,8 +209,11 @@ end)
 local function appFixture(deniedPermission)
     local f = fixture()
     if deniedPermission then f.permissions[deniedPermission] = false end
-    f.database = { state = { version = 2, counts = { alice = 99 }, displayNames = { alice = "Alice" } } }
-    PersistentDB = setmetatable({}, { __index = function() error("validation build must not read or write saved counters") end })
+    f.storageAccesses = 0
+    PersistentDB = setmetatable({}, { __index = function()
+        f.storageAccesses = f.storageAccesses + 1
+        error("validation build must not access persistent storage")
+    end })
     Event = {}
     for _, name in ipairs({ "Logic", "ChatMessage", "OptionalPermissionChanged", "GameStateChanged", "WorldCreated",
         "WorldUpdated", "RegionCreated", "RegionUpdated", "SettingsLayerReady", "ContentLayerReady", "Draw" }) do
@@ -249,7 +252,6 @@ local function appFixture(deniedPermission)
             return button
         end },
     }
-    -- Execute the real entrypoint: the legacy bone app must not subscribe.
     dofile("main.lua")
     assert(Event.ChatMessage.callbacks.deathtracker, "entrypoint must use the deathtracker identifier")
     f.shutdown = PluginShutdown
@@ -265,12 +267,12 @@ test("active Death Tracker entrypoint has an opener and honestly unavailable dis
     assert(f.panel.texts[2].content:match("Your Death Count: unavailable"))
     assert(f.panel.texts[2].content:match("Friend death counts: unavailable"))
     assert(f.panel.buttons["Capture one group death notice"] and not f.panel.buttons["Retry save"])
-    assert(f.database.state.counts.alice == 99)
+    assert(f.storageAccesses == 0)
     f.shutdown()
     for _, event in pairs(Event) do assert(next(event.callbacks) == nil) end
     for _, widget in ipairs(f.widgets) do assert(widget.destroyed) end
 end)
-test("one eligible candidate is inspectable but never increments or imports legacy counters", function()
+test("one eligible candidate is inspectable but never creates a persistent death count", function()
     local f = appFixture()
     f.panel.buttons["Capture one group death notice"]()
     f.emit("ChatMessage", f.notice())
@@ -278,7 +280,7 @@ test("one eligible candidate is inspectable but never increments or imports lega
     f.panel.buttons["Show captured notice"]()
     local snapshot = f.widgets[#f.widgets]
     assert(snapshot.field.text:match("NOT a counted death") and not snapshot.field.text:match("Alice"))
-    assert(f.database.state.counts.alice == 99)
+    assert(f.storageAccesses == 0)
     f.emit("Draw")
     assert(f.panel.texts[2].content:match("unavailable"))
     f.shutdown()
@@ -298,7 +300,7 @@ test("permission revocation and character changes clear displayed captures", fun
         f.emit("Draw")
         assert(snapshot.field.text:match("No eligible candidate"))
         f.emit("ChatMessage", f.notice())
-        assert(snapshot.field.text:match("No eligible candidate") and f.database.state.counts.alice == 99)
+        assert(snapshot.field.text:match("No eligible candidate") and f.storageAccesses == 0)
         f.shutdown()
     end
 end)
@@ -338,7 +340,7 @@ test("native permission objects work at startup, revocation, regrant and rearmin
         f.emit("ChatMessage", f.notice())
         f.emit("Draw")
         assert(snapshot.field.text:match("NOT a counted death"))
-        assert(f.database.state.counts.alice == 99)
+        assert(f.storageAccesses == 0)
         for _, line in ipairs(f.messages) do assert(not line:match("expected PluginPermission"), line) end
         f.shutdown()
     end
@@ -354,11 +356,11 @@ test("group and scene loss disable capture; no unavailable-membership fallback i
         f.emit("Logic", { logicTick = 120 })
         f.emit("Draw")
         if mode == "friends" then assert(f.panel.texts[2].content:match("Friend capture suspended")) end
-        assert(f.database.state.counts.alice == 99)
+        assert(f.storageAccesses == 0)
         f.shutdown()
     end
 end)
-test("native roster errors are visible, stop capture and preserve old storage", function()
+test("native roster errors are visible and stop capture without touching persistence", function()
     local f = appFixture()
     f.panel.buttons["Capture one group death notice"]()
     local get = ui.Interfaces.GetComponent
@@ -370,7 +372,7 @@ test("native roster errors are visible, stop capture and preserve old storage", 
     f.emit("Logic", { logicTick = 120 })
     f.emit("Draw")
     assert(f.panel.texts[2].content:match("Monitoring error") and f.panel.texts[2].content:match("native roster unavailable"))
-    assert(f.database.state.counts.alice == 99)
+    assert(f.storageAccesses == 0)
     f.shutdown()
 end)
 test("settings resizing and stale UI callbacks cannot rearm after shutdown", function()
@@ -385,6 +387,6 @@ test("settings resizing and stale UI callbacks cannot rearm after shutdown", fun
     settings.buttons["Capture one group death notice"]()
     f.buttons[1].click()
     for _, event in pairs(Event) do assert(next(event.callbacks) == nil) end
-    assert(f.database.state.counts.alice == 99)
+    assert(f.storageAccesses == 0)
 end)
 return passed
