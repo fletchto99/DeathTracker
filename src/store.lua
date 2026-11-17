@@ -1,12 +1,7 @@
 local Store = {}
 Store.__index = Store
 
-function Store.nameKey(name)
-    if type(name) ~= "string" then return nil end
-    local display = name:gsub("_", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
-    if #display < 1 or #display > 12 or not display:match("^[A-Za-z0-9 ]+$") then return nil end
-    return display:lower(), display
-end
+Store.nameKey = require("src/names").nameKey
 
 function Store.new(db)
     local data = db:GetStructuredData("state")

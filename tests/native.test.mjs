@@ -6,13 +6,14 @@ import { unzipSync } from "fflate";
 import { build, runtimeFiles } from "../scripts/build.mjs";
 
 const runtime = await runtimeFiles();
+const source = ["main.lua", ...(await readdir("src")).filter((name) => name.endsWith(".lua")).map((name) => `src/${name}`)];
 const suites = (await readdir("tests")).filter((name) => name.endsWith("_test.lua"));
 
 async function runSuite(t, suite, archive) {
   const factory = new LuaFactory();
-  for (const file of runtime.filter((name) => name.endsWith(".lua"))) {
-    const source = archive ? Buffer.from(archive[file]).toString("utf8") : await readFile(file, "utf8");
-    await factory.mountFile(file, source);
+  for (const file of (archive ? runtime : source).filter((name) => name.endsWith(".lua"))) {
+    const contents = archive ? Buffer.from(archive[file]).toString("utf8") : await readFile(file, "utf8");
+    await factory.mountFile(file, contents);
   }
   const lua = await factory.createEngine();
   t.after(() => lua.global.close());
@@ -26,15 +27,15 @@ for (const suite of suites) {
   test(`Lua 5.4: ${suite}`, (t) => runSuite(t, suite));
 }
 
-test("packaged runtime passes the same Lua scenarios and contains only plugin files", async (t) => {
+test("packaged Death Tracker runs the entrypoint scenarios without legacy pickup code", async (t) => {
   const archive = unzipSync(await readFile(await build()));
   assert.deepEqual(Object.keys(archive).sort(), [...runtime].sort());
   const manifest = JSON.parse(Buffer.from(archive["plugin.json"]).toString("utf8"));
-  assert.equal(manifest.name, "BoneCollector");
-  assert.deepEqual(manifest.requiredPermissions, []);
-  assert.deepEqual(manifest.optionalPermissions, []);
+  assert.equal(manifest.name, "Death Tracker");
+  assert.deepEqual(manifest.requiredPermissions, ["chatAccess"]);
+  assert.deepEqual(manifest.optionalPermissions, ["trackingAccess"]);
   assert.equal(manifest.version, JSON.parse(await readFile("package.json", "utf8")).version);
-  for (const suite of suites) {
+  for (const suite of ["death_tracker_test.lua"]) {
     await t.test(suite, (child) => runSuite(child, suite, archive));
   }
 });

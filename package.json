@@ -1,8 +1,8 @@
 {
   "name": "bonecollector",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Conservative, collection-gated player bone counters for the native RuneScape 3 Lua API.",
+  "description": "Native RuneScape 3 friends-only group Death Tracker contract validation.",
   "type": "module",
   "engines": {
     "node": ">=22"

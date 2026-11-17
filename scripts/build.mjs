@@ -1,8 +1,8 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { zipSync } from "fflate";
 
 export async function runtimeFiles() {
-  return ["main.lua", "plugin.json", ...(await readdir("src")).filter((name) => name.endsWith(".lua")).map((name) => `src/${name}`)];
+  return ["main.lua", "plugin.json", "src/death_tracker.lua", "src/group_capture.lua", "src/names.lua"];
 }
 
 export async function build() {
@@ -11,7 +11,7 @@ export async function build() {
   const entries = Object.fromEntries(await Promise.all(
     files.map(async (name) => [name, [new Uint8Array(await readFile(name)), { mtime: new Date("2026-01-01T00:00:00Z") }]]),
   ));
-  const output = `dist/BoneCollector-${manifest.version}.zip`;
+  const output = `dist/DeathTracker-${manifest.version}.zip`;
   await mkdir("dist", { recursive: true });
   await writeFile(output, zipSync(entries));
   return output;
