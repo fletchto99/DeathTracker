@@ -1,8 +1,8 @@
 {
   "name": "deathtracker",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
-  "description": "Native RuneScape 3 friends-only group Death Tracker contract validation.",
+  "description": "Native RuneScape 3 self-death counter; friends-only group tracking planned next.",
   "repository": {
     "type": "git",
     "url": "https://github.com/fletchto99/DeathTracker.git"

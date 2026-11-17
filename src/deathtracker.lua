@@ -1,4 +1,5 @@
-local Capture = require("src/group_capture")
+local Deaths = require("src/deaths")
+local Names = require("src/names")
 local Tracker = {}
 
 local function own(widget)
@@ -12,34 +13,48 @@ end
 
 function Tracker.start()
     assert(type(prettyui) == "table" and type(prettyui.Window) == "table"
-        and type(prettyui.Window.AddTextField) == "function" and type(prettyui.SimpleButton) == "table"
-        and type(prettyui.SimpleView) == "table", "Death Tracker requires PrettyUI Window/TextField, SimpleButton and SimpleView.")
-    local capture = Capture.new()
-    local tick, lastPoll, inGame, stopped, failure = 0, -10, true, false, nil
-    local panels, launcher, snapshot = {}, nil, nil
-    local events = {}
+        and type(prettyui.SimpleButton) == "table" and type(prettyui.SimpleView) == "table",
+        "Death Tracker requires PrettyUI Window, SimpleButton and SimpleView.")
+    local deaths = Deaths.new(PersistentDB)
+    local panels, launcher, events = {}, nil, {}
+    local sessionOpen, stopped, granted, failure = true, false, false, nil
+    local characterKey, characterName, identityError, lastNotice, lastError
+    local lastPoll = -10
 
-    local function destroy(kind)
-        local panel = panels[kind]
-        panels[kind] = nil
-        if panel then panel.widget:Destroy() end
+    local function report(message)
+        if message and message ~= lastError then print("[Death Tracker] " .. message) end
+        lastError = message
     end
 
-    local function destroyUI()
-        for kind in pairs(panels) do destroy(kind) end
-        if launcher then launcher.widget:Destroy(); launcher = nil end
-        if snapshot then snapshot.widget:Destroy(); snapshot = nil end
+    local function refreshIdentity()
+        if not sessionOpen or not Player.IsAvailable() then return end
+        local entity = PlayerList.Self()
+        if not entity or not entity.isValid then return end
+        local key, display = Names.nameKey(entity.displayName)
+        if not key then
+            characterKey, characterName = nil, nil
+            identityError = "Cannot resolve the current character's display name; counting is suspended."
+            return
+        end
+        if key ~= characterKey then lastNotice = nil end
+        characterKey, characterName, identityError = key, display, nil
     end
 
-    local function readContext()
-        if not inGame then return nil, "Waiting for an active game." end
-        return Capture.context()
+    local function refreshPermission()
+        granted = Plugin.HasPermission(PluginPermissions.chatAccess) == true
     end
 
     local function status()
-        return (failure and ("Monitoring error: " .. failure) or capture.status)
-            .. "\nYour Death Count: unavailable (validation mode)"
-            .. "\nFriend death counts: unavailable (validation mode)"
+        local current
+        if failure then current = "Monitoring stopped: " .. failure
+        elseif deaths.loadError then current = deaths.loadError
+        elseif not granted then current = "Disabled: chatAccess permission is denied or revoked."
+        elseif identityError then current = identityError
+        elseif not characterKey then current = "Waiting to observe your logged-in character."
+        else current = "Monitoring your exact self-death game notification." end
+        if deaths.saveError then current = deaths.saveError .. "\n" .. current end
+        if lastNotice then current = current .. "\n" .. lastNotice end
+        return current
     end
 
     local function guarded(action)
@@ -47,63 +62,37 @@ function Tracker.start()
             if stopped then return end
             local ok, err = pcall(action, ...)
             if not ok then
-                local previous = failure
                 failure = tostring(err)
-                capture:reset("Monitoring error; capture disabled.")
-                if previous ~= failure then print("[Death Tracker] " .. failure) end
+                report(failure)
             end
         end
     end
 
-    local function snapshotText()
-        return capture.result or "No eligible candidate captured. This build records no death counts."
+    local function destroy(kind)
+        local owner = panels[kind]
+        panels[kind] = nil
+        if owner then owner.widget:Destroy() end
     end
 
-    local function showSnapshot(parent)
-        if snapshot and not live(snapshot) then snapshot.widget:Destroy(); snapshot = nil end
-        if not snapshot then
-            snapshot = own(prettyui.Window.new(parent, {
-                title = "Death Tracker capture", x = 200, y = 110, width = 620, height = 440,
-                minWidth = 440, minHeight = 300, resizable = true,
-            }))
-            local owner = snapshot
-            owner.widget:AddText({ text = "Local, name-redacted capture only. Click the field, Ctrl+A, Ctrl+C.\n"
-                .. "No unrelated chat is stored; no death counter is enabled.", height = 60, maxLines = 3 })
-            owner.field = owner.widget:AddTextField({ text = snapshotText(), height = 260, maxLength = 4000 })
-            owner.widget:AddSimpleButton("Refresh capture", guarded(function()
-                if snapshot == owner and live(owner) then owner.field:SetText(snapshotText(), false) end
-            end))
-        end
-        snapshot.field:SetText(snapshotText(), false)
-        snapshot.lastResult = capture.result
-        snapshot.widget:Show()
+    local function destroyUI()
+        for kind in pairs(panels) do destroy(kind) end
+        if launcher then launcher.widget:Destroy(); launcher = nil end
     end
 
     local function populate(kind, owner)
         panels[kind] = owner
         local widget = owner.widget
         widget:AddTitle("Death Tracker")
-        widget:AddText({ text = "VALIDATION MODE - automatic counting is not enabled.\n"
-            .. "Friends in your visible group only; your own group notice is the exception.\n"
-            .. "Keep the Friends and Group rosters open during capture.", height = 88, maxLines = 4 })
-        owner.status = widget:AddText({ text = status(), height = 120, maxLines = 5 })
-        widget:AddSimpleButton("Capture one group death notice", guarded(function()
+        owner.count = widget:AddText({ text = "", height = 40, maxLines = 1 })
+        owner.character = widget:AddText({ text = "", height = 32, maxLines = 1 })
+        owner.status = widget:AddText({ text = status(), height = 160, maxLines = 7 })
+        widget:AddText({ text = "Self-death test: automatic, no arming or group required.\n"
+            .. "Friends-only group tracking is planned next and is not active yet.", height = 64, maxLines = 3 })
+        widget:AddSimpleButton("Retry save", guarded(function()
             if panels[kind] ~= owner or not live(owner) then return end
-            local context, problem, identity = readContext()
-            failure = nil
-            capture:arm(context, problem, identity, tick)
-        end))
-        widget:AddSimpleButton("Stop capture", guarded(function()
-            if panels[kind] == owner and live(owner) then
-                capture.armed = false
-                capture.status = "Capture stopped; no death counts were recorded."
-            end
-        end))
-        widget:AddSimpleButton("Show captured notice", guarded(function()
-            if panels[kind] ~= owner or not live(owner) then return end
-            local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
-            assert(parent, "Open the capture while logged into the game.")
-            showSnapshot(parent)
+            local saved, err = deaths:save()
+            lastNotice = saved and "Death counts saved." or err
+            report(err)
         end))
     end
 
@@ -111,8 +100,8 @@ function Tracker.start()
         if panels.window and not live(panels.window) then destroy("window") end
         if not panels.window then
             populate("window", own(prettyui.Window.new(parent, {
-                title = "Death Tracker", x = 180, y = 90, width = 520, height = 480,
-                minWidth = 440, minHeight = 320, resizable = true,
+                title = "Death Tracker", x = 180, y = 90, width = 520, height = 420,
+                minWidth = 440, minHeight = 300, resizable = true,
             })))
         end
         panels.window.widget:Show()
@@ -125,37 +114,43 @@ function Tracker.start()
     end
 
     subscribe("Logic", function(event)
-        tick = event.logicTick
-        capture:advance(tick)
-        if tick - lastPoll < 10 then return end
-        lastPoll = tick
-        local context, problem, identity = readContext()
-        capture:observe(context, problem, identity)
-        if not Plugin.HasPermission(PluginPermissions.chatAccess) or not Plugin.HasPermission(PluginPermissions.trackingAccess)
-            or not Player.IsAvailable() then
-            capture.result = nil
-            if snapshot and live(snapshot) then snapshot.field:SetText(snapshotText(), false) end
-        end
+        if event.logicTick - lastPoll < 5 then return end
+        lastPoll = event.logicTick
+        refreshPermission()
+        refreshIdentity()
     end)
     subscribe("ChatMessage", function(event)
-        if not capture.armed then return end
-        local context, problem, identity = readContext()
-        capture:message(event, context, problem, identity, tick)
+        if failure or not Deaths.matches(event) then return end
+        refreshPermission()
+        if not granted then return end
+        refreshIdentity()
+        if not sessionOpen or not characterKey then
+            lastNotice = "Self-death notification skipped: no known logged-in character."
+            report(lastNotice)
+            return
+        end
+        local result, err = deaths:record(characterKey, event.timestamp)
+        if result == "counted" then lastNotice = "Self-death notification counted."
+        elseif result == "duplicate" then lastNotice = "Duplicate notification ignored."
+        else lastNotice = err end
+        report(err)
     end)
     subscribe("OptionalPermissionChanged", function(event)
-        if event.permissionName == "chatAccess" or event.permissionName == "trackingAccess" then
-            capture:reset("Permission changed; arm a new capture after permissions are available.")
-            if snapshot and live(snapshot) then snapshot.field:SetText(snapshotText(), false) end
-        end
+        if event.permissionName == "chatAccess" then refreshPermission() end
     end)
     subscribe("GameStateChanged", function(event)
-        inGame = event.newState == GameState.GAME
-        capture:reset("Game state changed; arm a new capture.")
-        if not inGame then destroyUI() end
+        local state = event.newState
+        if state == GameState.LOGINSCREEN or state == GameState.LOBBY or state == GameState.ACCOUNT_CREATE
+            or state == GameState.BOOT or state == GameState.INIT then
+            sessionOpen, characterKey, characterName, identityError, lastNotice = false, nil, nil, nil, nil
+            destroyUI()
+        elseif state == GameState.GAME then
+            sessionOpen = true
+            refreshIdentity()
+        end
+        -- Loading/reconnection/world transitions keep a known session identity
+        -- so a death notice can arrive while the local entity is unavailable.
     end)
-    for _, name in ipairs({ "WorldCreated", "WorldUpdated", "RegionCreated", "RegionUpdated" }) do
-        subscribe(name, function() capture:reset("Scene changed; capture cleared.") end)
-    end
     for _, kind in ipairs({ "settings", "content" }) do
         subscribe(kind == "settings" and "SettingsLayerReady" or "ContentLayerReady", function(event)
             destroy(kind)
@@ -166,7 +161,7 @@ function Tracker.start()
         end)
     end
     subscribe("Draw", function()
-        if not inGame or not Player.IsAvailable() then destroyUI(); return end
+        if not sessionOpen then destroyUI(); return end
         if launcher and not live(launcher) then destroyUI() end
         if not launcher then
             local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
@@ -186,23 +181,25 @@ function Tracker.start()
                     panel.width, panel.height = parent.width, parent.height
                     panel.widget:SetSize(parent.width, parent.height)
                 end
+                local count = deaths:count(characterKey)
+                local countText = "Your Death Count: " .. (count ~= nil and tostring(count) or "unavailable")
                 local current = status()
                 if panel.lastStatus ~= current then panel.status.content, panel.lastStatus = current, current end
+                if panel.lastCount ~= countText then panel.count.content, panel.lastCount = countText, countText end
+                local name = characterName and ("Character: " .. characterName) or "Character: waiting for login"
+                if panel.lastCharacter ~= name then panel.character.content, panel.lastCharacter = name, name end
             end
-        end
-        if snapshot and not live(snapshot) then snapshot.widget:Destroy(); snapshot = nil end
-        if snapshot and snapshot.lastResult ~= capture.result then
-            snapshot.field:SetText(snapshotText(), false)
-            snapshot.lastResult = capture.result
         end
     end)
 
-    print("[Death Tracker] Validation build: counting disabled; group-death notification verification required.")
+    guarded(function() refreshPermission(); refreshIdentity() end)()
+    report(deaths.loadError)
+    print("[Death Tracker] Self-death counter loaded. Only the exact general game notification is counted.")
     return function()
         stopped = true
         for _, event in ipairs(events) do event.Unsubscribe("deathtracker") end
-        capture:reset("Shutdown")
         destroyUI()
+        if deaths.unsaved then print("[Death Tracker] WARNING: unsaved death counts may be lost on reload.") end
     end
 end
 

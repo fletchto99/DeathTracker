@@ -1,6 +1,6 @@
 {
   "name": "Death Tracker",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "hasSettingsIcon": true,
   "hasRibbonIcon": true,
   "requiredDependencies": {
@@ -8,5 +8,5 @@
   },
   "optionalDependencies": {},
   "requiredPermissions": ["chatAccess"],
-  "optionalPermissions": ["trackingAccess"]
+  "optionalPermissions": []
 }

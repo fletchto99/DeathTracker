@@ -1,168 +1,134 @@
 # Death Tracker
 
-Native **RuneScape 3 Lua** plugin development in
+Native **RuneScape 3 Lua** plugin in
 [fletchto99/DeathTracker](https://github.com/fletchto99/DeathTracker).
-The intended tracker counts deaths of **friends in your group**,
-with a separate **Your Death Count**. It does not use Alt1 or RuneLite.
+The product goal is **Your Death Count** plus **friends-only group death counts**.
+Version **0.4.0 starts with a functional self-death counter** for the first
+in-client test. Friends' deaths remain the next step, not a removed feature goal.
 
-## Current status: 0.3.3 validation build
+The self counter automatically increments for the incoming general game message:
 
-The display name is **Death Tracker**, the development/plugin identifier is
-**`deathtracker`**, and release archives use **`DeathTracker`**. This build
-includes the fix for the reported native permission argument error: runtime
-checks use `PluginPermissions.chatAccess` / `PluginPermissions.trackingAccess`
-objects, not the strings used in the JSON manifest. It does not enable counting.
+```text
+Oh dear, you are dead!
+```
 
-**Automatic death counting is NOT enabled.** The user reports a game message
-like `"Player xyz has died"`, but its exact native `ChatType`, formatting,
-sender fields, and delivery/deduplication behavior have not been verified.
-This build captures one narrowly matched candidate to establish that contract.
-It must not be presented as a working death counter.
+It does not require arming capture, a group, open friends/group panels, health
+polling, or a tracking ID. Typing the sentence in player chat does not count.
+Friend counting is not active yet. This is native Lua, not Alt1 or RuneLite.
 
-The interface says **Your Death Count: unavailable (validation mode)** and
-**Friend death counts: unavailable (validation mode)**, rather than inventing
-zeroes. Self capture is limited to the same
-group-message example; **solo deaths are not implemented**.
-
-Detection research uses only group notifications, not a disappearance or
-zero-health fallback. The build never accesses `PersistentDB`, imports prior
-statistics, or writes new counters. There is no migration or database-purge code.
-
-## Install for beta validation
+## Install or update in the developer beta
 
 1. Follow the [official developer-beta setup](https://developer.runescape.com/rs/tutorial/1helloworld.html).
    On Windows the default cache is `C:\ProgramData\Jagex\RuneScape-BETA`.
 2. Install **PrettyUI (mod.io 6398181)** through the native plugin system.
-   Window/TextField, SimpleButton and SimpleView support is required.
-3. Open the beta console with **Alt + the key below Esc**. For a clean
-   dev-plugins directory, create the destination in the next step.
-4. Extract all files from `dist\DeathTracker-0.3.3.zip` into
-   `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker` (or
-   `dev_plugins\deathtracker` under your actual beta cache). Its five runtime
-   files are `main.lua`, `plugin.json`, `src\deathtracker.lua`,
-   `src\group_capture.lua`, and `src\names.lua`.
-5. After copying finishes, run `prf`, then `pon deathtracker` for a new
-   installation or `prl deathtracker` if it is already enabled.
-   The UI shows **Death Tracker**.
+   The plugin uses its Window, SimpleButton and SimpleView APIs.
+3. Extract all files from `dist\DeathTracker-0.4.0.zip` into
+   `C:\ProgramData\Jagex\RuneScape-BETA\dev_plugins\deathtracker`, or
+   `dev_plugins\deathtracker` under your actual beta cache.
+4. Once copying finishes, open the beta console with **Alt + the key below Esc**,
+   then run `prf` and `pon deathtracker` for a new installation, or
+   `prf` and `prl deathtracker` for an already enabled plugin.
 
-`chatAccess` is a **required** native permission. `trackingAccess` is declared
-optional so the UI can explain its absence, but is required to arm this
-character-bound validation capture. Review/grant these in the native plugin
-permission UI; the beta also provides `ppr deathtracker` to request declared
-permissions. If denied chat access prevents the client from enabling the plugin,
-resolve the native permission prompt first. A running plugin checks permissions
-again before capture and shows a disabled status if they are missing/revoked.
-No HTTP permission, service, or external upload is used.
+The ZIP has five runtime files: `main.lua`, `plugin.json`,
+`src\deathtracker.lua`, `src\deaths.lua`, and `src\names.lua`.
+An older installed `src\group_capture.lua` is not loaded by this entrypoint.
+Only Lua and PrettyUI are needed in game; Node.js is development tooling only.
 
-Only the Lua files and PrettyUI are needed in game. **Node.js is development
-tooling only.** Reload updates with `prl deathtracker`; disable with
-`poff deathtracker`.
+**Only `chatAccess` is requested.** Review/grant it in the native plugin permission
+UI; the beta also provides `ppr deathtracker`. No `trackingAccess`, HTTP permission
+or external service is used. If required chat access is denied, the client may
+prevent activation; if revoked while running, the interface shows counting
+disabled and messages are ignored. Runtime checks use the native
+`PluginPermissions.chatAccess` object, not a manifest string.
 
-## Capture one real group death notification
+## Use
 
-This is the next required evidence, not an instruction to type the message.
-Typing the same sentence in public/private/friends/group chat is not accepted.
+Click **Death Tracker** near the upper-left of the game UI. The interface shows:
 
-1. Join a normal PvM group with a consenting player who is actually on your
-   in-game **Friends list**. Keep **Friends** and **Group** panels open, with
-   their name and your own group row visible. The current diagnostic roster
-   layout is based on the normal group panel, not Group Ironman's separate UI.
-2. Click the **Death Tracker** button near the upper-left of the game UI.
-   The same controls are in **Plugin Hub > Manage > Death Tracker > Settings**
-   and its native Plugins ribbon panel.
-3. Click **Capture one group death notice**. It arms for 60 seconds. Have the
-   consenting friend perform one beta test death that produces the real game
-   notification. No other game action is required.
-4. Open **Show captured notice**. If captured, click the field, **Ctrl+A**,
-   **Ctrl+C**, then paste locally. The player name and character tracking ID
-   are not included. Native text-field copying is still unverified in client;
-   if it fails, take a screenshot of this capture window.
-5. If nothing is captured, record the displayed status and the exact visible
-   game notification, redacting names in screenshots. Do **not** substitute a
-   player-authored sentence. A different template/category or unavailable
-   roster is evidence to investigate, not a reason to broaden the filter blindly.
+```text
+Your Death Count: 0
+Character: Your name
+```
 
-A second, separately armed test can capture your own grouped notification.
-It is marked `subject=local character`; you do not need to be on your own
-friends list. A genuine death message for a **non-friend group member** is not
-retained. Keep this evidence local and review it before sharing.
+The count updates automatically and is saved immediately when an accepted
+self-death notification arrives. You can also view it through **Plugin Hub >
+Manage > Death Tracker > Settings** or the native Plugins ribbon panel.
+No manual arm/start action is needed. The count survives plugin reloads.
 
-Captures are in memory only. They are cleared on game/scene lifecycle changes,
-permission revocation, missing character identity, character switch or reload.
-Such a transition may clear a self-death capture; record that observation rather
-than interpreting the missing result as a count. Repeated notifications cannot
-append to an already completed one-shot capture. **Stop capture** disarms it
-without changing data. Arming again starts a fresh capture.
+Status text shows whether monitoring is active, chat access is missing, the
+character has not yet been observed, or storage/monitoring failed. **NOT SAVED**
+means the displayed count is only in memory. Use **Retry save** before reloading
+or closing the client. A failed storage read or invalid saved format suspends
+counting rather than silently resetting the total; resolve the storage problem
+and reload. There is no reset, import, migration or database-purge operation.
 
-## Exactly what the validation build does
+## Message and identity rules
 
-- Reads the visible game's **Friends list**, not a manually configured name list
-  and not friends-chat/clan membership. Names must resolve to 1-12 ASCII letters,
-  digits, spaces or underscores. Matching is case-insensitive.
-- Reads normal group name rows from the visible native roster. Your own row and
-  at least one other member must be observed. Missing/closed/changed rosters
-  suspend capture; there is no "track everyone" fallback.
-- Resolves the local character through `Player.GetTrackingID()` and the local
-  entity's display name. A missing ID is not treated as an anonymous shared
-  account. The ID is used only in transient memory and is never logged.
-- While armed, accepts only the user's exact example shape,
-  `Player <name> has died`, with an optional final period and supported colour/
-  shadow tags. It records no unrelated chat.
-- The candidate must have all three sender fields empty and be in one of the
-  **possible system categories** `GENERAL`, `ENGINE`, `GROUPCHAT_NOTIFICATION`
-  or `GROUP_IRONMAN_NOTIFICATION`. These are a bounded capture search, **not an
-  assertion that any of them authenticates a death**. Ordinary/player/plugin
-  chat categories are excluded even when their text is identical.
-- Immediately re-reads current friend/group UI observations for the candidate.
-  The subject must be in the observed group and either a currently observed
-  friend or the local character. Changed membership invalidates the armed
-  capture rather than using a previously cached allowlist.
-- Displays the numeric chat category, timestamp, empty-sender status, role,
-  observed roster sizes, and the name-redacted raw template. It neither edits
-  chat events nor sends any game actions.
+- Accept only `ChatType.GENERAL` (0), the general game-message channel, with
+  **all three documented sender-name fields empty**. Public, private, friends,
+  group, broadcast, engine and plugin-message categories are not accepted.
+  `Chat.AddMessage` always produces `ChatType.PLUGIN`, so plugin-generated
+  lookalikes do not increment the count.
+- Match the complete sentence exactly, including case and punctuation. Native
+  `<col=...>` / `</col>` colour tags are removed; extra words, whitespace,
+  other markup and approximate text are rejected.
+- Use the current local display name, case-insensitively with underscores
+  normalized to spaces, to separate character totals. Once a valid local name
+  is observed, keep it through loading, reconnecting and death/respawn entity
+  gaps. Clear it on the login screen, lobby or account/startup states; replace
+  it when a different local character is observed. A message received before
+  any local identity is known cannot safely be counted and produces a status.
+- Save fresh per-character counters under the plugin's `selfDeaths.v1` key in
+  local `PersistentDB`. A display-name change creates a separate name-keyed
+  counter; case changes do not. This modest limitation avoids requesting a
+  stable tracking ID.
+- Use the documented notification timestamp to suppress repeated delivery:
+  the last 16 accepted timestamps are stored **per character**, including
+  across reloads. No time-based cooldown blocks a later message with a different
+  timestamp. Since the API provides seconds, not a unique death/event ID,
+  identical notifications for the same character within the same second cannot
+  be distinguished and are treated as one. Very old replays beyond the bounded
+  history are not guaranteed to be recognized.
 
-## Remaining contract questions
+No unrelated chat is logged or saved. The database is local to the device and
+client type; beta/live data are separate. Use one client writing these counters
+at a time: the native database is shared and does not expose an atomic increment.
 
-**Friends UI freshness is not yet proven.** Open, visible rows are a conservative
-diagnostic prerequisite, not a documented membership freshness guarantee.
-Filters, scrolling/clipping, add/remove operations, closing/reopening and relogs
-need validation. In particular, `ONFRIENDTRANSMIT` reports that friends data
-changed but supplies only the component, not a friend list. The probe does not
-claim this hook solves roster completeness or stale data.
+## First in-client test
 
-**The notification is not yet authenticated as a death event.** The native
-`ChatMessage` payload has text, chat type, three sender-name strings and a
-seconds-resolution timestamp, but no unique death/message ID or group ID.
-The supplied sentence has not been independently mapped to a category.
-Before enabling counters we must verify real payloads, current group context,
-duplicates, rapid separate deaths, and local-player notification behavior.
-Capture tests use synthetic examples and do not establish native provenance.
+The source and packaged Lua pass automated tests, **not an in-client test**.
+The exact sentence is user-observed. The initial supported path is the native
+general game-message category; real delivery metadata still needs confirmation
+in the beta.
 
-**Observation is limited.** No off-screen, other-world or non-group friend deaths
-are promised. The API does not expose a generic friend's HP/death field.
-Future verified counters must be persisted per character. This validation
-build implements neither persistent
-death totals nor a manual increment workaround.
+1. After installing/reloading, open Death Tracker and confirm the current
+   character, numeric count, and monitoring status. No group or friends panel
+   is needed.
+2. Perform one appropriate self-death test in the developer beta. When the game
+   emits **Oh dear, you are dead!**, the count should increase once.
+3. Reload with `prl deathtracker`; the count should remain. A subsequent death
+   should add another count without requiring a manual arm.
+4. Typing that sentence in ordinary chat or receiving unrelated game text must
+   not increment it.
 
-## Sources
+If a real death does not count, record the displayed status and the exact game
+message/console error. Do not broaden to arbitrary chat types or remove sender
+checks just to force a count. The tracker counts observed notifications, not
+historical deaths or deaths while the plugin is disabled. Localized messages or
+death modes that do not emit this exact notification are outside this first test.
 
-- [Official ChatMessage payload and permission](https://developer.runescape.com/rs/core/events.html#chatmessage)
-  and [ChatType enumeration](https://developer.runescape.com/rs/game/chat.html).
-  Local `Chat.AddMessage` messages are explicitly `ChatType.PLUGIN`.
-- [Native permission checks](https://developer.runescape.com/rs/core/plugin.html#haspermission),
-  [character tracking ID](https://developer.runescape.com/rs/game/player.html#gettrackingid),
-  and [shared-per-device PersistentDB scope](https://developer.runescape.com/rs/core/persistentdb.html).
-- [Official dynamic component traversal](https://developer.runescape.com/rs/ui/component_collection.html),
-  [visibility/relationship hooks](https://developer.runescape.com/rs/ui/component.html),
-  and [text components](https://developer.runescape.com/rs/ui/decorative_components/text.html).
-- [Native config dump](https://github.com/FriendlyDevelopment/runescape-api-stubs/blob/230702b372e83a40b4cfdde01f5a18c5266ec28c/csvs/Component.csv):
-  `FRIENDS2__FRIEND_NAME_LAYER = 36044807` (550:7),
-  `GROUP_CHILD__BUILD_AREA = 99549187` (1519:3). Runtime uses named constants.
-- [RuneUI reference adapter](https://github.com/JeremyDwayne/RuneUI/blob/34e4914a52ea5b1cf6eef23961d48285c595a74f/src/adapter.lua)
-  and [group row layout](https://github.com/JeremyDwayne/RuneUI/blob/34e4914a52ea5b1cf6eef23961d48285c595a74f/src/interfaces.lua):
-  category 0, name-row dynamic IDs `1 + 23*n`. The reference notes that closed
-  group rows freeze. This is prior art requiring validation, not an official
-  stable roster/death contract.
+## Friends-only group tracking: next step
+
+Friends' death tracking is still planned. The earlier narrow group-notification
+capture implementation is retained in `src\group_capture.lua` with focused
+source-only tests. It is **not packaged, loaded, or required** by the self counter,
+so its roster and identity research cannot block this test.
+
+Before enabling friends' counters, verify the real group-death message's native
+category, template, sender metadata, current group context and fresh in-game
+friends membership. Ordinary chat must never become death evidence, and
+non-friend group members must remain excluded. No off-screen/other-world
+coverage or authenticated group-death event is currently promised.
 
 ## Development
 
@@ -174,18 +140,28 @@ npm run check
 npm run build
 ```
 
-Tests execute actual Lua modules through Wasmoon's Lua 5.4. The client uses
-Lua 5.4.8 and is not exercised by these checks. The current entrypoint tests
-run again against the built ZIP, and fail if the
-validation build accesses PersistentDB. They cover candidate filtering,
-spoofed ordinary chat, friend/group/self exclusions, duplicate capture,
-permissions, identity and lifecycle failures, UI opening and storage isolation.
-Permission mocks require opaque userdata and reject strings, covering the
-reported startup error as well as revocation, regrant and explicit rearming.
-Manifest permission names and `OptionalPermissionChanged.permissionName`
-remain strings, as required by those separate contracts.
+Tests execute actual Lua modules through Wasmoon's Lua 5.4. The client uses Lua
+5.4.8 and is not exercised by these checks. Self-counter scenarios run against
+both source and the actual ZIP: message filtering, persistence/reload, duplicate
+evidence, character separation, transient entity loss, logout, denied/revoked
+permissions, read/write failures and UI lifecycle. Permission mocks require
+userdata, preserving the regression for the earlier native argument error.
+Package tests ensure no tracking-ID or group/friends prerequisites ship in this
+self-test build. The deferred group capture has a separate source-only suite.
+
+## References and distribution
+
+- [Official ChatMessage payload](https://developer.runescape.com/rs/core/events.html#chatmessage),
+  [ChatType enumeration and plugin-generated messages](https://developer.runescape.com/rs/game/chat.html),
+  and [native permission checks](https://developer.runescape.com/rs/core/plugin.html#haspermission).
+- [Player availability and entity access](https://developer.runescape.com/rs/game/player.html),
+  [entity validity](https://developer.runescape.com/rs/game/entity/playerentity.html),
+  [game-state events](https://developer.runescape.com/rs/core/events.html#gamestatechanged),
+  and [PersistentDB](https://developer.runescape.com/rs/core/persistentdb.html).
+- [Native-plugin game/player chat classification reference](https://github.com/GrynjolfLabs/rs3-Watchdog/blob/811d75df5c4531507e2499c54430b6d358e002e1/src/chat_types.lua)
+  identifies `GENERAL` as game messages, separate from player chat. This does
+  not substitute for testing the actual self-death payload in the client.
 
 The public repository is not Jagex approval. Before live distribution, follow
 the [plugin guidelines and moderation process](https://developer.runescape.com/rs/submission/guidelines.html).
-Other-player information is subject to review; no export service is included.
 A real author-selected `contactEmailAddress` is still required for submission.
