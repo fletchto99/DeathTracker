@@ -47,7 +47,10 @@ end
 
 function Matcher:localPosition(tile)
     self.localTile = tile
-    if self.pending and not nearby(tile, self.pending.bone.tile) then self:cancel("left pickup tile") end
+    if self.pending and not nearby(tile, self.pending.bone.tile) then
+        self.trace("pickup_block", "local moved away", tile and tileKey(tile), tileKey(self.pending.bone.tile))
+        self:cancel("left pickup tile")
+    end
 end
 
 function Matcher:observePlayer(key, name, tile, displayName)
@@ -79,7 +82,10 @@ function Matcher:observePlayer(key, name, tile, displayName)
             bone.occupants[key] = true
         end
     end
-    if self.pending and nearby(tile, self.pending.bone.tile) then self:cancel("another player near pickup") end
+    if self.pending and nearby(tile, self.pending.bone.tile) then
+        self.trace("pickup_block", "player entered pickup area", key, tileKey(tile))
+        self:cancel("another player near pickup")
+    end
 end
 
 function Matcher:removePlayer(key)
@@ -99,7 +105,10 @@ function Matcher:removePlayer(key)
         if self.tick - at <= Matcher.window then departure.occupants[visitor] = true end
     end
     self.departures[key] = departure
-    self.trace("departure", key, tileKey(player.tile), departure.eligible)
+    self.trace("departure", key, "tile", tileKey(player.tile), "eligible", departure.eligible,
+        "name_resolved", player.name ~= nil, "scene_age", self.tick - self.started,
+        "seen_ticks", self.tick - player.since, "stationary_ticks", self.tick - player.tileSince,
+        "sample_age", self.tick - player.last)
 end
 
 function Matcher:seedGround(key, tile, count)
@@ -152,10 +161,17 @@ function Matcher:forgetGround(key)
 end
 
 function Matcher:safePickup(tile)
-    if not nearby(self.localTile, tile) then return false end
-    for _, player in pairs(self.players) do
-        if self.tick - player.last <= 10 and nearby(player.tile, tile) then return false end
+    if not nearby(self.localTile, tile) then
+        self.trace("pickup_block", "local distant or unavailable", self.localTile and tileKey(self.localTile), "target", tileKey(tile))
+        return false
     end
+    for _, player in pairs(self.players) do
+        if self.tick - player.last <= 10 and nearby(player.tile, tile) then
+            self.trace("pickup_block", "other player", player.key, tileKey(player.tile), "target", tileKey(tile))
+            return false
+        end
+    end
+    self.trace("pickup_check", "clear", "local", tileKey(self.localTile), "target", tileKey(tile))
     return true
 end
 
@@ -163,7 +179,8 @@ function Matcher:select(key)
     self:cancel("another menu selection")
     local bone, ground = self.bones[key], self.ground[key]
     if not bone or bone.blocked or bone.counted or bone.collected or not ground or ground.count ~= 1 then
-        self.trace("skip", "Take has no eligible single bone", key)
+        self.trace("skip", "Take has no eligible single bone", key, "candidate_exists", bone ~= nil,
+            "blocked", bone and bone.blocked, "collected", bone and bone.collected, "ground_count", ground and ground.count)
         return
     end
     if not self:safePickup(bone.tile) then
@@ -192,6 +209,8 @@ end
 function Matcher:finishPacket()
     local pending = self.pending
     if pending and (pending.ground or pending.inventory) then
+        self.trace("packet_evidence", pending.bone.key, "ground_packet", pending.ground, "inventory_packet",
+            pending.inventory, "closing_packet", self.packet, "intent_age", self.tick - pending.at)
         if pending.ground == self.packet and pending.inventory == self.packet then
             pending.bone.collected = self.tick
             self.trace("collection_evidence", pending.bone.key, self.packet)

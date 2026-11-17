@@ -1,6 +1,8 @@
 local Store = require("src/store")
 local Matcher = require("src/matcher")
 local View = require("src/view")
+local LootProbe = require("src/loot_probe")
+local Diagnostics = require("src/diagnostics")
 local App = {}
 
 local function tile(entity)
@@ -23,6 +25,7 @@ function App.start()
     local selfEntity, selfTile, inventory, lastPoll = nil, nil, nil, 0
     local message, sequence = "", 0
     local matcher, view
+    local diagnosticLog = Diagnostics.new()
 
     local function trace(kind, ...)
         if kind == "skip" then message = "Skipped: " .. tostring((...)) end
@@ -30,8 +33,9 @@ function App.start()
         sequence = sequence + 1
         local values = {}
         for i = 1, select("#", ...) do values[i] = tostring(select(i, ...)) end
-        print(string.format("[BoneCollector] #%d tick=%d packet=%d %s %s",
-            sequence, matcher and matcher.tick or 0, matcher and matcher.packet or 0, kind, table.concat(values, " ")))
+        local line = string.format("[BoneCollector] #%d tick=%d packet=%d %s %s",
+            sequence, matcher and matcher.tick or 0, matcher and matcher.packet or 0, kind, table.concat(values, " "))
+        print(diagnosticLog:append(line))
     end
 
     matcher = Matcher.new(function(name, display)
@@ -42,8 +46,10 @@ function App.start()
             print("[BoneCollector] " .. message)
         end
     end, trace)
+    local lootProbe = LootProbe.new(trace)
 
     local function restart(reason)
+        lootProbe:clear()
         ready, players, stacks, selfEntity, selfTile, inventory = false, {}, {}, nil, nil, nil
         matcher:reset(reason)
     end
@@ -157,11 +163,11 @@ function App.start()
     end
 
     local function groundEvent(kind, event)
-        if not active() then return end
+        if not active() then trace("ground_event_ignored", kind, "monitoring not ready"); return end
         local entity, objID = event.objStackEntity, event.objType.id
         local record, index = find(stacks, entity)
         trace("ground_" .. kind, record and record.key or "new", objID, event.count,
-            event.oldCount, event.newCount, event.isOwner, entity.isValid)
+            event.oldCount, event.newCount, event.isOwner, entity.isValid, "config", event.objType.configName)
         if not record then
             if not entity.isValid then restart("unresolved invalid ground proxy"); return end
             record = rememberStack(entity)
@@ -188,6 +194,8 @@ function App.start()
             after = stackCount(entity)
         end
         local resolved = after - before == expectedDelta
+        trace("ground_state", record.key, "tile", record.tile.level, record.tile.x, record.tile.z,
+            "bone_before_after", before, after, "expected_delta", expectedDelta, "resolved", resolved)
         if objID == boneID or before ~= after then
             matcher:groundChange(record.key, record.tile, before, after, event.isOwner, resolved)
         end
@@ -207,6 +215,7 @@ function App.start()
             local ok, err = pcall(callback, payload)
             if not ok then
                 fatal = name .. ": " .. tostring(err)
+                trace("error", fatal)
                 restart("API error")
                 print("[BoneCollector] Monitoring stopped: " .. fatal)
             end
@@ -220,10 +229,30 @@ function App.start()
             if store.unsaved then print("[BoneCollector] " .. message) end
         end,
         diagnostics = function(enabled)
-            diagnostics = enabled == true
-            sequence = 0
-            if diagnostics then trace("diagnostics_on", "ordinary bone config", boneID) end
+            if enabled == true then
+                diagnostics, sequence = true, 0
+                diagnosticLog:clear()
+                trace("diagnostics_on", "0.2.1 direct pickup investigation", "ordinary_bone_config", boneID)
+                trace("readiness", "ready", ready, "in_game", inGame, "player_cache", #players,
+                    "scene_age_ticks", matcher.tick - matcher.started)
+                trace("thresholds", "warmup_ticks", Matcher.warmup, "stationary_ticks", 30,
+                    "sample_age_max", 10, "match_window", Matcher.window, "pickup_window", Matcher.pickupWindow)
+                for key, player in pairs(matcher.players) do
+                    trace("observed_player", key, "name_resolved", player.name ~= nil,
+                        "tile", player.tile.level, player.tile.x, player.tile.z,
+                        "seen_ticks", matcher.tick - player.since, "sample_age", matcher.tick - player.last)
+                end
+                if type(bonesConfig.groundOpNames) == "table" then
+                    for index, name in pairs(bonesConfig.groundOpNames) do trace("bone_ground_op", index, name) end
+                end
+                lootProbe:setEnabled(true)
+            else
+                trace("diagnostics_off", "snapshot retained until next capture or reload")
+                lootProbe:setEnabled(false)
+                diagnostics = false
+            end
         end,
+        snapshot = function() return diagnosticLog:snapshot() end,
         status = function()
             local status
             if fatal then status = "Monitoring stopped; reload with prl bonecollector. " .. fatal
@@ -238,6 +267,7 @@ function App.start()
         assert(event.logicTick >= matcher.tick, "non-monotonic client clock")
         matcher.tick = event.logicTick
         if not syncSelf() then return end
+        lootProbe:update(event.logicTick)
         if not ready then seed(); return end
         if event.logicTick - lastPoll >= 5 then
             lastPoll = event.logicTick
@@ -246,6 +276,7 @@ function App.start()
             for index = #players, 1, -1 do
                 local record = players[index]
                 if not record.entity.isValid then
+                    trace("player_cache_lost", record.key, "invalid before removal callback")
                     matcher.players[record.key] = nil
                     table.remove(players, index)
                 end
@@ -269,9 +300,16 @@ function App.start()
         end
     end, true)
     subscribe("PlayerEntityRemoved", function(event)
-        if not active() then return end
+        if not active() then trace("player_event_ignored", "removed", "monitoring not ready"); return end
         local record, index = find(players, event.playerEntity)
-        trace("player_removed", record and record.key or "unknown", event.playerEntity.isValid)
+        local uidMatched = false
+        if diagnostics and event.playerEntity.isValid then
+            for _, cached in ipairs(players) do
+                if cached.uid == event.playerEntity.uid then uidMatched = true; break end
+            end
+        end
+        trace("player_removed", record and record.key or "unknown", "valid", event.playerEntity.isValid,
+            "uid_matched", uidMatched, "cached_players", #players, "last_poll", lastPoll)
         if not record then restart("unresolved player removal"); return end
         if event.playerEntity.isValid then rememberPlayer(event.playerEntity) end
         matcher:removePlayer(record.key)
@@ -281,17 +319,25 @@ function App.start()
     subscribe("ObjStackEntityChanged", function(event) groundEvent("changed", event) end, true)
     subscribe("ObjStackEntityRemoved", function(event) groundEvent("removed", event) end, true)
     subscribe("MiniMenuEntrySelected", function(event)
-        if not active() then return end
+        lootProbe:menu(event.entry)
+        if not active() then trace("skip", "menu while monitoring not ready"); return end
         local entry, data = event.entry, event.entry.objData
-        trace("menu", entry.actionEntryType, entry.actionType, entry.verbText, data and data.stackIndex)
+        trace("menu", "entry_type", entry.actionEntryType, "action_type", entry.actionType, "verb", entry.verbText,
+            "stack_index", data and data.stackIndex, "obj_id", data and data.config.id,
+            "component_op", entry.componentData and entry.componentData.opIndex,
+            "local_tile", selfTile.level, selfTile.x, selfTile.z)
         if entry.actionEntryType ~= MiniMenuEntryType.OBJ or entry.actionType ~= MiniMenuActionType.OP_OBJ3
             or entry.verbText ~= "Take" or not data or not data.entity.isValid or data.config.id ~= boneID then
             matcher:cancel("non-supported menu action")
+            trace("skip", "unsupported menu action; expected OBJ / OP_OBJ3 / Take / BONES")
             return
         end
         local obj = data.entity:GetEntry(data.stackIndex)
         local record = find(stacks, data.entity)
-        if not obj or obj.configID ~= boneID or obj.count ~= 1 or not record or stackCount(data.entity) ~= 1 then
+        local boneCount = stackCount(data.entity)
+        trace("menu_target", record and record.key or "uncached", "entry_obj", obj and obj.configID,
+            "entry_count", obj and obj.count, "tile_bones", boneCount)
+        if not obj or obj.configID ~= boneID or obj.count ~= 1 or not record or boneCount ~= 1 then
             matcher:cancel("ambiguous menu target")
             trace("skip", "ambiguous menu target")
             return
@@ -303,8 +349,10 @@ function App.start()
         matcher:select(record.key)
     end, true)
     subscribe("InventoryUpdated", function(event)
+        lootProbe:inventoryEvent("updated", event)
         if not active() then return end
         if event.inv.id ~= config.Inv.INV.id then
+            trace("other_inventory_update", event.inv.id, "cancel_pending", matcher.pending ~= nil)
             matcher:cancel("another inventory updated")
             return
         end
@@ -318,6 +366,7 @@ function App.start()
     end, true)
     for _, name in ipairs({ "InventoryAdded", "InventoryRemoved" }) do
         subscribe(name, function(event)
+            lootProbe:inventoryEvent(name, event)
             if event.inv.id == config.Inv.INV.id then restart(name) end
         end, true)
     end
@@ -343,6 +392,7 @@ function App.start()
     print("[BoneCollector] Monitoring all nearby players. Click BoneCollector to open collected-bone counts.")
     return function()
         stopped = true
+        lootProbe:setEnabled(false)
         for _, event in ipairs(subscriptions) do event.Unsubscribe("BoneCollector") end
         restart("shutdown")
         view:destroyAll()

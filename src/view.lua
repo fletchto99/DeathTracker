@@ -30,6 +30,7 @@ end
 
 function View:destroyOverlay()
     self:destroy("window")
+    if self.snapshotWindow then self.snapshotWindow.widget:Destroy(); self.snapshotWindow = nil end
     local launcher = self.launcher
     self.launcher = nil
     if launcher then launcher.widget:Destroy() end
@@ -46,8 +47,8 @@ function View:populate(kind, panel)
     self.panels[kind] = panel
     widget:AddTitle("BoneCollector")
     widget:AddText({
-        text = "All nearby players are considered automatically.\nPickup attribution is inferred, not proof of death.",
-        height = 52, maxLines = 2,
+        text = "All nearby players are considered automatically.\nPickup attribution is inferred, not proof of death.\nArea loot: diagnostics only, not counted.",
+        height = 76, maxLines = 3,
     })
     panel.status = widget:AddText({ text = "", height = 76, maxLines = 3 })
     widget:AddSimpleButton("Retry save", function()
@@ -56,7 +57,37 @@ function View:populate(kind, panel)
     panel.diagnostics = widget:AddSimpleButton("Diagnostics (this session)", function(_, active)
         if self.panels[kind] == panel and live(panel) then self.callbacks.diagnostics(active) end
     end, { toggleable = true })
+    widget:AddSimpleButton("Show diagnostic snapshot", function()
+        if self.panels[kind] == panel and live(panel) then self:showSnapshot() end
+    end)
     widget:AddTitle("Collected bones")
+end
+
+function View:showSnapshot()
+    assert(type(prettyui.Window.AddTextField) == "function",
+        "BoneCollector diagnostics require PrettyUI TextField support; update PrettyUI or read the client console.")
+    if self.snapshotWindow and not live(self.snapshotWindow) then
+        self.snapshotWindow.widget:Destroy()
+        self.snapshotWindow = nil
+    end
+    if not self.snapshotWindow then
+        local parent = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__PLUGIN_BUILD_LAYER_TOP)
+        assert(parent, "BoneCollector: open the diagnostic snapshot while logged into the game.")
+        local owner = own(prettyui.Window.new(parent, {
+            title = "BoneCollector diagnostics", x = 200, y = 110, width = 620, height = 440,
+            minWidth = 440, minHeight = 300, resizable = true,
+        }))
+        self.snapshotWindow = owner
+        owner.widget:AddText({
+            text = "Local snapshot only. Click the field, then Ctrl+A and Ctrl+C.\nPaste into a local text file. Editing this field does not change counters.",
+            height = 68, maxLines = 3,
+        })
+        owner.field = owner.widget:AddTextField({ text = self.callbacks.snapshot(), maxLength = 26000, height = 260 })
+        owner.widget:AddSimpleButton("Refresh snapshot", function()
+            if self.snapshotWindow == owner and live(owner) then owner.field:SetText(self.callbacks.snapshot(), false) end
+        end)
+    end
+    self.snapshotWindow.widget:Show()
 end
 
 function View:show(kind, parent)
@@ -99,6 +130,10 @@ end
 
 function View:refresh(inGame)
     if inGame ~= nil then self:updateLauncher(inGame) end
+    if self.snapshotWindow and not live(self.snapshotWindow) then
+        self.snapshotWindow.widget:Destroy()
+        self.snapshotWindow = nil
+    end
     local status, diagnostics = self.callbacks.status()
     if self.store.unsaved then status = "NOT SAVED - changes may be lost. Use Retry save.\n" .. status end
     local rows

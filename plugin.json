@@ -1,6 +1,6 @@
 {
   "name": "BoneCollector",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "hasSettingsIcon": true,
   "hasRibbonIcon": true,
   "requiredDependencies": {

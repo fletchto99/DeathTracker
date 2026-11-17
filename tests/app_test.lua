@@ -122,13 +122,20 @@ local function fixture(options)
         self.buttons[label] = button
         return button
     end
+    function SimpleView:AddTextField(options)
+        self.field = {
+            text = options.text,
+            SetText = function(self, text, notify) assert(not notify); self.text = text end,
+        }
+        return self.field
+    end
     function SimpleView:SetSize(width, height) self.width, self.height = width, height end
     function SimpleView:Destroy() self.destroyed = true; self.invalidate() end
     function SimpleView:Show() self.hidden = false; self.shows = (self.shows or 0) + 1 end
     function SimpleView:Close() self.hidden = true end
     prettyui = {
         SimpleView = SimpleView,
-        Window = { new = function(parent, dimensions)
+        Window = { AddTextField = SimpleView.AddTextField, new = function(parent, dimensions)
             assert(parent == f.gameLayer)
             return newWidget(dimensions)
         end },
@@ -549,6 +556,82 @@ test("an unresolvable display name is still skipped rather than stored as a fake
     f.collect(f.ground({ f.bone() }, true))
     f.go(300)
     assert(next(PersistentDB.data.counts) == nil)
+    f.noFatal()
+    f.shutdown()
+end)
+test("direct Take rejection produces a frozen copyable trace without changing counters", function()
+    local f = fixture()
+    local panel = f.show()
+    f.go(161)
+    panel.buttons["Diagnostics (this session)"].click(nil, true)
+    f.die()
+    local ground = f.ground({ f.bone() }, true)
+    f.localData.coordGrid.x = 102
+    f.click(ground)
+    f.remove(ground)
+    f.gain()
+    f.emit("ServerLogic")
+    f.go(300)
+    panel.buttons["Diagnostics (this session)"].click(nil, false)
+    panel.buttons["Show diagnostic snapshot"].click()
+    local snapshot = f.widgets[#f.widgets]
+    for _, marker in ipairs({ "readiness", "thresholds", "departure", "stationary_ticks", "sample_age",
+        "ground_state", "menu", "action_type", "stack_index", "local_tile", "pickup_block",
+        "local distant or unavailable", "diagnostics_off" }) do
+        assert(snapshot.field.text:find(marker, 1, true), marker)
+    end
+    assert(not snapshot.field.text:match("Alice"))
+    assert(f.credit() == 0 and PersistentDB.writes == 0)
+    local text = snapshot.field.text
+    f.go(400)
+    snapshot.buttons["Refresh snapshot"].click()
+    assert(snapshot.field.text == text)
+    snapshot.field.text = "user editing the copy"
+    snapshot.buttons["Refresh snapshot"].click()
+    assert(snapshot.field.text == text and f.credit() == 0)
+    f.noFatal()
+    f.shutdown()
+    assert(snapshot.destroyed)
+end)
+test("split-packet diagnostic identifies missing evidence without relaxing the gate", function()
+    local f = fixture()
+    local panel = f.show()
+    f.go(161)
+    panel.buttons["Diagnostics (this session)"].click(nil, true)
+    f.die()
+    local ground = f.ground({ f.bone() }, true)
+    f.click(ground)
+    f.remove(ground)
+    f.emit("ServerLogic")
+    f.gain()
+    f.emit("ServerLogic")
+    f.go(300)
+    panel.buttons["Diagnostics (this session)"].click(nil, false)
+    panel.buttons["Show diagnostic snapshot"].click()
+    local text = f.widgets[#f.widgets].field.text
+    assert(text:match("packet_evidence") and text:match("inventory_packet nil"))
+    assert(text:match("ground and inventory did not change in the same server packet"))
+    assert(f.credit() == 0)
+    f.noFatal()
+    f.shutdown()
+end)
+test("wrong menu operation is visible in the trace and remains rejected", function()
+    local f = fixture()
+    local panel = f.show()
+    f.go(161)
+    panel.buttons["Diagnostics (this session)"].click(nil, true)
+    f.die()
+    local ground = f.ground({ f.bone() }, true)
+    f.click(ground, { actionType = 18 })
+    f.remove(ground)
+    f.gain()
+    f.emit("ServerLogic")
+    f.go(300)
+    panel.buttons["Diagnostics (this session)"].click(nil, false)
+    panel.buttons["Show diagnostic snapshot"].click()
+    local text = f.widgets[#f.widgets].field.text
+    assert(text:match("action_type 18") and text:match("unsupported menu action"))
+    assert(f.credit() == 0)
     f.noFatal()
     f.shutdown()
 end)
